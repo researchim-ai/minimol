@@ -1,0 +1,4 @@
+primary: macro_spearman
+min_epochs: 10
+recipes: [supervised, synthetic_pretrain, teacher_soft, supervised_plus_teacher]
+rule: ship supervised unless the held-out primary metric improves

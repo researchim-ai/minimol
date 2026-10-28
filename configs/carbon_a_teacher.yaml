@@ -1,0 +1,7 @@
+repository: HuggingFaceBio/Carbon-A-1.2B
+revision: UNVERIFIED
+trust_remote_code: false
+reviewed_remote_code: false
+expansion: repeat
+expansion_verified_against_upstream: false
+note: Pin a commit and review the remote module before any weight download.

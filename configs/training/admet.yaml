@@ -1,0 +1,18 @@
+model:
+  preset: "5m"
+  n_assays: 0
+train:
+  seed: 11
+  batch_size_per_gpu: 16
+  epochs: 2
+  max_steps: 4
+  lr: 0.001
+  weight_decay: 0.0
+  early_stopping_patience: 3
+  grad_clip: 1.0
+  precision: fp32
+  overrides_note: pass model.overrides for a smaller smoke net
+loss:
+  delta: 1.0
+data:
+  path: data/processed/admet_sample/data.parquet

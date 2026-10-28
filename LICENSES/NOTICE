@@ -1,0 +1,16 @@
+Minimol
+Copyright 2026 Minimol contributors
+
+This repository is licensed under the Apache License, Version 2.0.
+Generated synthetic rows in this codebase are part of that work.
+
+Third-party datasets and teacher weights are not included and are not
+relicensed by this NOTICE. Each row in LICENSES/data_registry.csv stays
+out of training until its decision is APPROVED. A teacher model license
+does not license the genomes or assays used to train that teacher.
+
+Carbon-A, Carbon-X, Malinois, TDC, ChEMBL, BindingDB, ZINC, PLINDER,
+RefSeq, JASPAR, and PubChem remain under their own terms.
+
+RDKit, PyTorch, and other libraries are used under their own licenses
+and are not redistributed here.

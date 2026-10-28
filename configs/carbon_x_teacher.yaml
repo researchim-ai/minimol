@@ -1,0 +1,8 @@
+repository: HuggingFaceBio/Carbon-X
+revision: UNVERIFIED
+trust_remote_code: false
+reviewed_remote_code: false
+note: >
+  Option scores are conditional token log-likelihoods.
+  Do not report them as event probabilities.
+  A NO-GO on held-out metric stops the teacher.

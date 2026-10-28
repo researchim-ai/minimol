@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Minimol generated data and run artifacts
+/data/raw/
+/data/interim/
+/data/processed/
+/artifacts/
+/results/
+/models/*.pt
+/models/*.onnx

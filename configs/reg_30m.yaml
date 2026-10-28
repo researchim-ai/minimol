@@ -1,0 +1,24 @@
+experiment: reg_30m_v0
+model:
+  kind: hybrid
+  preset: "30m"
+  param_budget: 30000000
+  rc_augment: false
+train:
+  seed: 42
+  batch_size_per_gpu: 16
+  accumulation_steps: 1
+  precision: bf16
+  optimizer: adamw
+  lr: 0.0003
+  weight_decay: 0.01
+  epochs: 35
+  scheduler: cosine
+  early_stopping_patience: 7
+  grad_clip: 1.0
+  device: auto
+loss:
+  type: huber
+  delta: 1.0
+data:
+  path: data/processed/reg_sample/data.parquet

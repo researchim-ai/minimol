@@ -1,0 +1,4 @@
+method: temperature_or_split_conformal
+fit_on: calibration
+never_fit_on: test
+metrics: [ece, brier, coverage, width]

@@ -1,0 +1,5 @@
+registry: LICENSES/data_registry.csv
+dataset: synthetic_admet
+official_tdc: false
+plinder_release: UNPINNED
+note: TDC and PLINDER stay blocked until the registry decision is APPROVED and the release is pinned.

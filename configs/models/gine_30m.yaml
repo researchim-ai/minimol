@@ -1,0 +1,15 @@
+model:
+  preset: "30m"
+  param_budget: 30000000
+  n_assays: 0
+train:
+  seed: 47
+  batch_size_per_gpu: 16
+  epochs: 30
+  lr: 0.0002
+  weight_decay: 0.01
+  early_stopping_patience: 15
+  grad_clip: 1.0
+  precision: bf16
+data:
+  path: data/processed/admet_sample/data.parquet

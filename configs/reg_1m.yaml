@@ -1,0 +1,20 @@
+experiment: reg_1m_baseline
+model:
+  kind: dilated_cnn
+  preset: "1m"
+  param_budget: 1000000
+  rc_augment: false
+train:
+  seed: 42
+  batch_size_per_gpu: 32
+  epochs: 20
+  lr: 0.0003
+  weight_decay: 0.01
+  early_stopping_patience: 7
+  grad_clip: 1.0
+  precision: fp32
+loss:
+  type: huber
+  delta: 1.0
+data:
+  path: data/processed/reg_sample/data.parquet

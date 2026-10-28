@@ -1,0 +1,6 @@
+official_tdc_splits: required
+plinder_release: UNPINNED
+development_test: scaffold_validation
+release_holdout: untouched
+label_scaler: train_only
+teacher_on_test: forbidden

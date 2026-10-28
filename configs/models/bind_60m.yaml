@@ -1,0 +1,14 @@
+model:
+  preset: bind_60m
+  param_budget: 80000000
+  runtime_includes_protein_encoder: true
+train:
+  seed: 11
+  batch_size_per_gpu: 8
+  epochs: 20
+  lr: 0.0001
+  weight_decay: 0.01
+data:
+  path: data/processed/bind_sample/data.parquet
+plinder_release: UNPINNED
+note: Synthetic labels are not Ki. Full training waits on an APPROVED assay-specific table.

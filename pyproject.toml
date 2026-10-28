@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minimol"
+version = "0.1.0"
+description = "Tiny research models for regulatory DNA, CDS annotation, and molecular property experiments."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Minimol contributors" }]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.0",
+  "pyarrow>=14",
+  "scikit-learn>=1.5",
+  "scipy>=1.11",
+  "pydantic>=2",
+  "pyyaml>=6",
+  "tqdm>=4",
+  "torch>=2.2",
+]
+
+[project.optional-dependencies]
+chem = ["rdkit"]
+serve = ["fastapi>=0.110", "uvicorn>=0.27", "httpx>=0.27"]
+export = ["onnx>=1.16", "onnxruntime>=1.18"]
+boost = ["xgboost>=2.0"]
+hf = ["transformers>=4.40", "huggingface_hub>=0.23", "safetensors>=0.4"]
+dev = ["pytest>=8", "ruff>=0.6", "httpx>=0.27"]
+
+[project.scripts]
+minimol = "minimol.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "slow: trains a full-size preset or exports a large ONNX graph",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

@@ -1,0 +1,16 @@
+model:
+  preset: "5m"
+  overrides:
+    fp_dim: 256
+    hidden: 128
+    depth: 2
+    dropout: 0.0
+train:
+  seed: 0
+  batch_size_per_gpu: 32
+  epochs: 3
+  max_steps: 20
+  lr: 0.001
+data:
+  source: builtin_demo_v1
+  limit: 20

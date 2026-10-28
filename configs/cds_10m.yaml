@@ -1,0 +1,21 @@
+experiment: cds_10m_gt_kd
+model:
+  preset: "10m"
+  param_budget: 10000000
+train:
+  seed: 42
+  batch_size_per_gpu: 4
+  epochs: 20
+  lr: 0.0003
+  weight_decay: 0.01
+  early_stopping_patience: 7
+  grad_clip: 1.0
+  precision: bf16
+loss:
+  lambda_gt: 1.0
+  lambda_kd: 0.25
+  lambda_boundary: 0.0
+  temperature: 1.0
+  scale_by_t2: false
+data:
+  path: data/processed/cds_sample/data.parquet

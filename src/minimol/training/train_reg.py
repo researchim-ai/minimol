@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 from minimol.data.normalize import LabelScaler, assay_order, audit_reg_frame, pivot_reg
 from minimol.data.sequences import maybe_reverse_complement_batch, one_hot_sequence
 from minimol.errors import MinimolError
-from minimol.evaluation.metrics import regression_report
+from minimol.evaluation.metrics import prediction_scale, regression_report
 from minimol.evaluation.reg import reg_metric_value
 from minimol.jsonutil import write_json
 from minimol.models.blocks import count_parameters
@@ -26,6 +26,7 @@ from minimol.training.loop import fit, move_batch, resolve_device
 from minimol.training.losses import inverse_variance_weights, masked_huber
 
 ARCH_KEYS = {
+    "head_kind",
     "channels",
     "n_blocks",
     "dropout",
@@ -119,7 +120,9 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
     data_path = Path(data_path)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"loading {data_path}", flush=True)
     frame = pd.read_parquet(data_path)
+    print(f"auditing {len(frame)} regulatory rows", flush=True)
     audit = audit_reg_frame(frame)
     if not audit["passed"]:
         raise MinimolError(f"regulatory table failed audit: {audit['issues'][:3]}")
@@ -141,6 +144,11 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
         use_weights,
     )
     device = resolve_device(train_cfg.get("device", "auto"))
+    print(
+        f"reg rows {len(rows)} train {sum(row['split'] == 'train' for row in rows)} "
+        f"validation {sum(row['split'] == 'validation' for row in rows)} device {device} preset {preset}",
+        flush=True,
+    )
     lr = float(train_cfg.get("lr", 3e-4))
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -177,6 +185,7 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
     lengths = [len(row["sequence"]) for row in rows]
     metadata = {
         "task": "reg",
+        "head_kind": model.head_kind,
         "preset": preset,
         "n_assays": len(assays),
         "overrides": overrides,
@@ -218,6 +227,10 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
         final["per_assay"] = final["per_target"]
     payload = {
         "task": "reg",
+        "head_kind": model.head_kind,
+        "config": config,
+        "n_train_sequences": len(train_loader.dataset),
+        "n_validation_sequences": 0 if val_loader is None else len(val_loader.dataset),
         "model": preset,
         "param_count": metadata["param_count"],
         "seed": seed,
@@ -230,6 +243,7 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
         "data_sha256": metadata["data_sha256"],
         "git_sha": metadata["git_sha"],
         "receptive_field_bp": model.receptive_field_bp,
+        "checkpoint_rule": "lowest validation MAE; Spearman is reported and is not used to pick weights",
     }
     write_json(out_dir / "metrics.json", payload)
     write_json(out_dir / "manifest.json", {"data_sha256": metadata["data_sha256"], "assay_names": assays})
@@ -246,7 +260,12 @@ def _report(model, loader, scaler, device, assays):
             actuals.append(batch["y_raw"].cpu().numpy())
             preds.append(pred.cpu().numpy())
             masks.append(batch["y_mask"].cpu().numpy())
-    return regression_report(np.concatenate(actuals), np.concatenate(preds), np.concatenate(masks), assays)
+    actual = np.concatenate(actuals)
+    pred = np.concatenate(preds)
+    mask = np.concatenate(masks)
+    report = regression_report(actual, pred, mask, assays)
+    report["prediction_scale"] = prediction_scale(actual, pred, mask, assays)
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:

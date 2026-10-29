@@ -15,6 +15,7 @@ from minimol import RESEARCH_DISCLAIMER, RESEARCH_DISCLAIMER_RU, __version__
 from minimol.data.normalize import LabelScaler
 from minimol.data.sequences import n_fraction, one_hot_sequence
 from minimol.data.standardize import standardize_smiles
+from minimol.inference import predict_cds_probabilities
 from minimol.models.cds_cnn import MinimolCDS
 from minimol.models.reg_cnn import MinimolReg
 from minimol.oracles.rdkit_properties import DETERMINISTIC_PROPERTIES, properties_from_smiles
@@ -69,7 +70,7 @@ class RateLimiter:
 def load_reg_checkpoint(path) -> LoadedModel:
     blob = torch.load(path, map_location="cpu", weights_only=False)
     meta = blob["metadata"]
-    model = MinimolReg(meta["preset"], n_assays=meta["n_assays"], **(meta.get("overrides") or {}))
+    model = MinimolReg.from_metadata(meta)
     model.load_state_dict(blob["model_state"])
     model.eval()
     scaler = LabelScaler().load_state_dict(meta["scaler"])
@@ -180,14 +181,13 @@ def create_app(
                 }
             )
             return payload
-        encoded = one_hot_sequence(body.sequence).unsqueeze(0)
-        with torch.no_grad():
-            probs = torch.sigmoid(cds.model(encoded)).squeeze(0).cpu().tolist()
+        window = int(cds.meta.get("attention_window") or 512)
+        probs = predict_cds_probabilities(cds.model, body.sequence, window=window, overlap=max(window // 4, 1))
         payload.update(
             {
                 "abstain": False,
                 "model_version": cds.meta.get("preset", body.model),
-                "strand_probabilities": {"+": probs[0], "-": probs[1]},
+                "strand_probabilities": {"+": probs[0].tolist(), "-": probs[1].tolist()},
                 "example_only": False,
                 "note": "Per-base coding probabilities are not a GFF gene annotation.",
             }

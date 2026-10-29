@@ -1,0 +1,11 @@
+model:
+  preset: tiny
+train:
+  seed: 1
+  epochs: 1
+  max_steps: 2
+  batch_size_per_gpu: 4
+  lr: 0.001
+  device: cpu
+data:
+  path: data/processed/precision_sample/data.parquet

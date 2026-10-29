@@ -18,7 +18,16 @@ from sklearn.linear_model import Ridge
 from minimol.data.featurize import morgan_fingerprint
 from minimol.data.normalize import assay_order, pivot_reg
 from minimol.data.sequences import gc_fraction
-from minimol.evaluation.metrics import auroc, mae, regression_report
+from minimol.evaluation.metrics import (
+    auprc,
+    auroc,
+    brier,
+    expected_calibration_error,
+    mae,
+    regression_report,
+    rmse,
+    spearman,
+)
 from minimol.jsonutil import write_json
 from minimol.oracles.rdkit_properties import MedianImputer, descriptor_vector
 from minimol.tracking import sha256_file
@@ -51,12 +60,20 @@ def kmer_matrix(sequences, ks=(3, 4, 5, 6)) -> np.ndarray:
     return matrix
 
 
-def mean_predict(y_train, mask_train, n_rows: int) -> np.ndarray:
-    means = []
+def _constant_predict(y_train, mask_train, n_rows: int, reduce) -> np.ndarray:
+    values = []
     for index in range(y_train.shape[1]):
-        values = y_train[mask_train[:, index], index]
-        means.append(float(values.mean()) if values.size else 0.0)
-    return np.repeat(np.asarray(means)[None, :], n_rows, axis=0)
+        chosen = y_train[mask_train[:, index], index]
+        values.append(float(reduce(chosen)) if chosen.size else 0.0)
+    return np.repeat(np.asarray(values)[None, :], n_rows, axis=0)
+
+
+def mean_predict(y_train, mask_train, n_rows: int) -> np.ndarray:
+    return _constant_predict(y_train, mask_train, n_rows, np.mean)
+
+
+def median_predict(y_train, mask_train, n_rows: int) -> np.ndarray:
+    return _constant_predict(y_train, mask_train, n_rows, np.median)
 
 
 def fit_gc_baseline(sequences, y, mask):
@@ -122,6 +139,7 @@ def run_reg_baselines(data_path: Path, out_dir: Path, k_max: int = 6, alpha: flo
     x_tr = kmer_matrix(seq_tr, ks)
     x_va = kmer_matrix(seq_va, ks)
     mean_hat = mean_predict(y_tr, m_tr, len(val))
+    median_hat = median_predict(y_tr, m_tr, len(val))
     gc_models = fit_gc_baseline(seq_tr, y_tr, m_tr)
     gc_hat = predict_gc(gc_models, seq_va)
     ridge_models = fit_ridge(x_tr, y_tr, m_tr, alpha=alpha)
@@ -137,10 +155,11 @@ def run_reg_baselines(data_path: Path, out_dir: Path, k_max: int = 6, alpha: flo
         "clinical_use": False,
         "data_sha256": sha256_file(data_path),
         "mean": regression_report(y_va, mean_hat, m_va, assays),
+        "median": regression_report(y_va, median_hat, m_va, assays),
         "gc": regression_report(y_va, gc_hat, m_va, assays),
         "ridge": regression_report(y_va, ridge_hat, m_va, assays),
     }
-    for key in ("mean", "gc", "ridge"):
+    for key in ("mean", "median", "gc", "ridge"):
         payload[key]["per_assay"] = payload[key]["per_target"]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -237,24 +256,46 @@ def run_chem_baselines(data_path: Path, out_dir: Path, seed: int = 0, rounds: in
         m_tr = np.asarray([row["mask"][endpoint] for row in train], dtype=bool)
         y_va = np.asarray([row["y"][endpoint] for row in val], dtype=np.float64)
         m_va = np.asarray([row["mask"][endpoint] for row in val], dtype=bool)
-        binary = set(np.unique(y_tr[m_tr])).issubset({0.0, 1.0}) and np.unique(y_tr[m_tr]).size <= 2
+        observed = y_tr[m_tr]
+        binary = set(np.unique(observed)).issubset({0.0, 1.0}) and np.unique(observed).size <= 2
         task = "binary" if binary else "regression"
         model = make(task, seed, rounds)
-        model.fit(desc_train[m_tr], y_tr[m_tr])
+        model.fit(desc_train[m_tr], observed)
+        report = {
+            "task": task,
+            "backend": backend,
+            "n_train": int(m_tr.sum()),
+            "n_validation": int(m_va.sum()),
+        }
+        neighbor = tanimoto_knn(fp_train[m_tr], observed, fp_val)
         if binary:
             scores = model.predict_proba(desc_val)[:, 1]
-            reports[endpoint] = {"auroc": auroc(y_va, scores, m_va), "task": task, "backend": backend}
+            report.update(
+                {
+                    "positive_fraction_train": float(observed.mean()) if observed.size else None,
+                    "auroc": auroc(y_va, scores, m_va),
+                    "auprc": auprc(y_va, scores, m_va),
+                    "brier": brier(scores, y_va, m_va),
+                    "ece": expected_calibration_error(scores, y_va, mask=m_va),
+                    "knn_auroc": auroc(y_va, neighbor, m_va),
+                    "knn_auprc": auprc(y_va, neighbor, m_va),
+                    "knn_brier": brier(neighbor, y_va, m_va),
+                }
+            )
         else:
             pred = model.predict(desc_val)
-            reports[endpoint] = {
-                "mae": mae(y_va, pred, m_va),
-                "mean_mae": mae(y_va, np.full_like(y_va, y_tr[m_tr].mean()), m_va),
-                "task": task,
-                "backend": backend,
-            }
-        if not binary:
-            neighbor = tanimoto_knn(fp_train[m_tr], y_tr[m_tr], fp_val)
-            reports[endpoint]["knn_mae"] = mae(y_va, neighbor, m_va)
+            report.update(
+                {
+                    "mae": mae(y_va, pred, m_va),
+                    "rmse": rmse(y_va, pred, m_va),
+                    "spearman": spearman(y_va, pred, m_va),
+                    "mean_mae": mae(y_va, np.full_like(y_va, float(observed.mean())), m_va),
+                    "median_mae": mae(y_va, np.full_like(y_va, float(np.median(observed))), m_va),
+                    "knn_mae": mae(y_va, neighbor, m_va),
+                    "knn_spearman": spearman(y_va, neighbor, m_va),
+                }
+            )
+        reports[endpoint] = report
     payload = {
         "task": "admet_baselines",
         "backend": backend,

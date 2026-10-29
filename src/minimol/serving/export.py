@@ -84,7 +84,7 @@ def export_checkpoint(run_dir: Path, fmt: str = "onnx", length: int | None = Non
     if task == "reg":
         from minimol.models.reg_cnn import MinimolReg
 
-        model = MinimolReg(meta["preset"], n_assays=meta["n_assays"], **(meta.get("overrides") or {}))
+        model = MinimolReg.from_metadata(meta)
     elif task == "cds":
         from minimol.models.cds_cnn import MinimolCDS
 

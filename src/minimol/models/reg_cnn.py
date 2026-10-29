@@ -22,8 +22,12 @@ from minimol.models.presets import REG_PRESETS, resolve_spec
 
 
 class MinimolReg(nn.Module):
-    def __init__(self, preset: str = "5m", n_assays: int = 3, **overrides):
+    def __init__(self, preset: str = "5m", n_assays: int = 3, head_kind: str = "nonlinear", **overrides):
         super().__init__()
+        if head_kind not in {"nonlinear", "legacy_linear"}:
+            raise ValueError(f"unknown regulatory head: {head_kind}")
+        self.head_kind = head_kind
+        self.head_activation = nn.GELU() if head_kind == "nonlinear" else nn.Identity()
         spec = resolve_spec(REG_PRESETS, preset, overrides)
         channels = int(spec["channels"])
         dropout = float(spec.get("dropout", 0.0))
@@ -75,7 +79,7 @@ class MinimolReg(nn.Module):
     def forward(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> torch.Tensor:
         pooled = self.encode(x, pad_mask)
         conditioned = pooled.unsqueeze(1) + self.assay_emb.weight.unsqueeze(0)
-        return self.out(conditioned).squeeze(-1)
+        return self.out(self.head_activation(conditioned)).squeeze(-1)
 
     def forward_assay(
         self,
@@ -85,4 +89,11 @@ class MinimolReg(nn.Module):
     ) -> torch.Tensor:
         pooled = self.encode(x, pad_mask)
         conditioned = pooled + self.assay_emb(assay_index)
-        return self.out(conditioned).squeeze(-1)
+        return self.out(self.head_activation(conditioned)).squeeze(-1)
+
+    @classmethod
+    def from_metadata(cls, metadata: dict):
+        """Old checkpoints keep their original linear-head predictions."""
+        overrides = dict(metadata.get("overrides") or {})
+        overrides.setdefault("head_kind", metadata.get("head_kind", "legacy_linear"))
+        return cls(metadata["preset"], n_assays=metadata["n_assays"], **overrides)

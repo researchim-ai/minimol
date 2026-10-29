@@ -40,6 +40,11 @@ minimol data reg-audit --data data/processed/reg_sample/data.parquet
 minimol train reg --config configs/reg_5m.yaml --data data/processed/reg_sample/data.parquet --out artifacts/reg_5m
 minimol train cds --config configs/cds_5m.yaml --data data/processed/cds_sample/data.parquet --out artifacts/cds_5m
 minimol train admet --config configs/models/gine_5m.yaml --data data/processed/admet_sample/data.parquet --out artifacts/admet_5m
+minimol train bind --config configs/smoke/bind.yaml --data data/processed/bind_sample/data.parquet --out artifacts/bind_smoke
+minimol train precision --config configs/smoke/precision.yaml --data data/processed/precision_sample/data.parquet --out artifacts/precision_smoke
+minimol eval controls --data data/processed/reg_sample/data.parquet --out artifacts/reg_controls
+minimol eval ood --data data/processed/admet_sample/data.parquet --out artifacts/admet_ood
+minimol eval motif --data data/processed/reg_sample/data.parquet --out artifacts/motif_baseline --motif TATAAA --motif CCAAT --motif GGGCGG
 minimol generation tasks --out artifacts/tasks.jsonl --limit 20
 minimol serve
 ```

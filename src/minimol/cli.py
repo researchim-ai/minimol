@@ -33,6 +33,26 @@ def cmd_audit_licenses(args) -> int:
     return 0
 
 
+def cmd_fetch_malinois(args) -> int:
+    from minimol.data.fetch_public import download_malinois, import_malinois
+    from minimol.data.registry import load_registry
+
+    payload = download_malinois(Path(args.registry), Path(args.raw))
+    row = load_registry(args.registry)
+    revision = str(row.loc[row["source"] == "malinois_mpra", "version"].iloc[0])
+    manifest = import_malinois(Path(args.raw), Path(args.out), revision=revision)
+    print(f"malinois rows {manifest['n_rows']} sha256 {manifest['sha256']} revision {payload['revision']}")
+    return 0
+
+
+def cmd_fetch_tdc(args) -> int:
+    from minimol.data.fetch_public import download_tdc_admet
+
+    payload = download_tdc_admet(Path(args.registry), Path(args.raw), Path(args.out), seed=args.seed)
+    print(f"tdc datasets {len(payload['datasets'])} revision {payload['revision']}")
+    return 0
+
+
 def cmd_reg_sample(args) -> int:
     from minimol.data.synthetic import write_reg_sample
 
@@ -53,6 +73,22 @@ def cmd_admet_sample(args) -> int:
     from minimol.data.synthetic import write_admet_sample
 
     manifest = write_admet_sample(Path(args.out), seed=args.seed)
+    print(f"rows {manifest['n_rows']}")
+    return 0
+
+
+def cmd_bind_sample(args) -> int:
+    from minimol.data.synthetic import write_bind_sample
+
+    manifest = write_bind_sample(Path(args.out), seed=args.seed)
+    print(f"rows {manifest['n_rows']}")
+    return 0
+
+
+def cmd_precision_sample(args) -> int:
+    from minimol.data.synthetic import write_precision_sample
+
+    manifest = write_precision_sample(Path(args.out), seed=args.seed)
     print(f"rows {manifest['n_rows']}")
     return 0
 
@@ -107,6 +143,8 @@ def cmd_train_reg(args) -> int:
     config = load_yaml(args.config)
     if args.max_steps is not None:
         config.setdefault("train", {})["max_steps"] = args.max_steps
+    if getattr(args, "seed", None) is not None:
+        config.setdefault("train", {})["seed"] = args.seed
     data = args.data or config.get("data", {}).get("path")
     train_reg(config, Path(data), Path(args.out))
     return 0
@@ -135,6 +173,121 @@ def cmd_train_admet(args) -> int:
         config.setdefault("train", {})["seed"] = args.seed
     data = args.data or config.get("data", {}).get("path")
     train_admet(config, Path(data), Path(args.out))
+    return 0
+
+
+def _train_from_config(train_fn, args) -> int:
+    from minimol.config import load_yaml
+
+    config = load_yaml(args.config)
+    if getattr(args, "max_steps", None) is not None:
+        config.setdefault("train", {})["max_steps"] = args.max_steps
+    data = args.data or config.get("data", {}).get("path")
+    train_fn(config, Path(data), Path(args.out))
+    return 0
+
+
+def cmd_train_bind(args) -> int:
+    from minimol.training.train_bind import train_bind
+
+    return _train_from_config(train_bind, args)
+
+
+def cmd_train_precision(args) -> int:
+    from minimol.training.train_precision import train_precision
+
+    return _train_from_config(train_precision, args)
+
+
+def cmd_train_tox(args) -> int:
+    from minimol.training.train_tox import train_tox
+
+    return _train_from_config(train_tox, args)
+
+
+def cmd_train_admet_baseline(args) -> int:
+    from minimol.training.baselines import run_chem_baselines
+
+    payload = run_chem_baselines(Path(args.data), Path(args.out))
+    print(f"backend {payload['backend']} endpoints {len(payload['endpoints'])}")
+    return 0
+
+
+def cmd_eval(args) -> int:
+    from minimol.evaluation.reload import evaluate_cds_checkpoint, evaluate_reg_checkpoint
+
+    if args.task == "reg":
+        payload = evaluate_reg_checkpoint(Path(args.checkpoint), Path(args.data), Path(args.out))
+        print(f"macro_spearman {payload['metrics'].get('macro_spearman')}")
+    else:
+        payload = evaluate_cds_checkpoint(Path(args.checkpoint), Path(args.data), Path(args.out))
+        print(f"macro_f1 {payload['metrics'].get('macro_f1')}")
+    return 0
+
+
+def cmd_bind_baselines(args) -> int:
+    from minimol.evaluation.bind_baselines import write_binding_baselines
+
+    report = write_binding_baselines(Path(args.data), Path(args.out))
+    print(f"target_prior_risk {report['target_prior_risk']}")
+    return 0
+
+
+def cmd_precision_baselines(args) -> int:
+    from minimol.evaluation.precision_baselines import write_precision_baselines
+
+    report = write_precision_baselines(Path(args.data), Path(args.out))
+    print(f"zero_delta MAE {report['scores']['zero_delta']['mae']}")
+    return 0
+
+
+def cmd_controls(args) -> int:
+    from minimol.evaluation.controls import write_regulatory_controls
+
+    report = write_regulatory_controls(Path(args.data), Path(args.out), seed=args.seed)
+    print(f"leakage_suspect {report['leakage_suspect']}")
+    return 0
+
+
+def cmd_aggregate(args) -> int:
+    import json
+
+    from minimol.evaluation.aggregate import write_aggregate
+
+    records = [json.loads(Path(path).read_text()) for path in args.metrics]
+    report = write_aggregate(records, args.field, Path(args.out))
+    print(f"runs {report['n_runs']}")
+    return 0
+
+
+def cmd_ood(args) -> int:
+    from minimol.evaluation.ood_report import write_applicability
+
+    report = write_applicability(Path(args.data), Path(args.out), threshold=args.threshold)
+    print(f"fraction_ood {report['fraction_ood']}")
+    return 0
+
+
+def cmd_motif(args) -> int:
+    from minimol.evaluation.motif_baseline import write_motif_baseline
+
+    report = write_motif_baseline(Path(args.data), Path(args.out), args.motif)
+    k562 = report["motif"]["per_target"].get("K562", {})
+    print(f"K562 MAE {k562.get('mae')}")
+    return 0
+
+
+def cmd_rank_benchmark(args) -> int:
+    from minimol.evaluation.rank_benchmark import fixed_budget_rank_report
+    from minimol.generation.task_factory import make_tasks
+    from minimol.jsonutil import write_json
+
+    tasks = make_tasks(limit=args.limit, seed=args.seed)
+    report = fixed_budget_rank_report(tasks, k=args.k, seed=args.seed)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    write_json(out / "metrics.json", report)
+    print(f"oracle NDCG {report['oracle_mean_ndcg']} random NDCG {report['random_mean_ndcg']}")
     return 0
 
 
@@ -261,6 +414,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     data = sub.add_parser("data")
     data_sub = data.add_subparsers(dest="action", required=True)
+    fetch_malinois = data_sub.add_parser("fetch-malinois")
+    fetch_malinois.add_argument("--registry", default="LICENSES/data_registry.csv")
+    fetch_malinois.add_argument("--raw", default="data/raw/malinois")
+    fetch_malinois.add_argument("--out", default="data/processed/malinois")
+    fetch_malinois.set_defaults(func=cmd_fetch_malinois)
+    fetch_tdc = data_sub.add_parser("fetch-tdc")
+    fetch_tdc.add_argument("--registry", default="LICENSES/data_registry.csv")
+    fetch_tdc.add_argument("--raw", default="data/raw/tdc_admet")
+    fetch_tdc.add_argument("--out", default="data/processed/tdc_admet")
+    fetch_tdc.add_argument("--seed", type=int, default=1)
+    fetch_tdc.set_defaults(func=cmd_fetch_tdc)
     reg_sample = data_sub.add_parser("reg-sample")
     reg_sample.add_argument("--out", required=True)
     reg_sample.add_argument("--n", type=int, default=40)
@@ -277,6 +441,14 @@ def build_parser() -> argparse.ArgumentParser:
     admet_sample.add_argument("--out", required=True)
     admet_sample.add_argument("--seed", type=int, default=5)
     admet_sample.set_defaults(func=cmd_admet_sample)
+    bind_sample = data_sub.add_parser("bind-sample")
+    bind_sample.add_argument("--out", required=True)
+    bind_sample.add_argument("--seed", type=int, default=3)
+    bind_sample.set_defaults(func=cmd_bind_sample)
+    precision_sample = data_sub.add_parser("precision-sample")
+    precision_sample.add_argument("--out", required=True)
+    precision_sample.add_argument("--seed", type=int, default=3)
+    precision_sample.set_defaults(func=cmd_precision_sample)
     build = data_sub.add_parser("build")
     build.add_argument("--dataset", required=True)
     build.add_argument("--out", required=True)
@@ -309,9 +481,24 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument("--data")
         item.add_argument("--out", required=True)
         item.add_argument("--max-steps", type=int)
-        if name == "admet":
+        if name in {"admet", "reg"}:
             item.add_argument("--seed", type=int)
         item.set_defaults(func=func)
+    for name, func in (
+        ("bind", cmd_train_bind),
+        ("precision", cmd_train_precision),
+        ("tox", cmd_train_tox),
+    ):
+        item = train_sub.add_parser(name)
+        item.add_argument("--config", required=True)
+        item.add_argument("--data")
+        item.add_argument("--out", required=True)
+        item.add_argument("--max-steps", type=int)
+        item.set_defaults(func=func)
+    chem_base = train_sub.add_parser("admet-baseline")
+    chem_base.add_argument("--data", required=True)
+    chem_base.add_argument("--out", required=True)
+    chem_base.set_defaults(func=cmd_train_admet_baseline)
     rank = train_sub.add_parser("rank")
     rank.add_argument("--config")
     rank.add_argument("--tasks")
@@ -344,6 +531,47 @@ def build_parser() -> argparse.ArgumentParser:
     carbon_x.add_argument("--with-metric", type=float)
     carbon_x.add_argument("--without-metric", type=float)
     carbon_x.set_defaults(func=cmd_teacher_x)
+
+    evaluate = sub.add_parser("eval")
+    eval_sub = evaluate.add_subparsers(dest="task", required=True)
+    for task in ("reg", "cds"):
+        item = eval_sub.add_parser(task)
+        item.add_argument("--checkpoint", required=True)
+        item.add_argument("--data", required=True)
+        item.add_argument("--out", required=True)
+        item.set_defaults(func=cmd_eval, task=task)
+    for name, func in (
+        ("bind-baselines", cmd_bind_baselines),
+        ("precision-baselines", cmd_precision_baselines),
+        ("controls", cmd_controls),
+    ):
+        item = eval_sub.add_parser(name)
+        item.add_argument("--data", required=True)
+        item.add_argument("--out", required=True)
+        if name == "controls":
+            item.add_argument("--seed", type=int, default=0)
+        item.set_defaults(func=func)
+    aggregate = eval_sub.add_parser("aggregate")
+    aggregate.add_argument("--metrics", nargs="+", required=True)
+    aggregate.add_argument("--field", nargs="+", required=True)
+    aggregate.add_argument("--out", required=True)
+    aggregate.set_defaults(func=cmd_aggregate)
+    ood = eval_sub.add_parser("ood")
+    ood.add_argument("--data", required=True)
+    ood.add_argument("--out", required=True)
+    ood.add_argument("--threshold", type=float, default=0.4)
+    ood.set_defaults(func=cmd_ood)
+    motif = eval_sub.add_parser("motif")
+    motif.add_argument("--data", required=True)
+    motif.add_argument("--out", required=True)
+    motif.add_argument("--motif", action="append", required=True)
+    motif.set_defaults(func=cmd_motif)
+    rank_bench = eval_sub.add_parser("rank-benchmark")
+    rank_bench.add_argument("--out", required=True)
+    rank_bench.add_argument("--limit", type=int, default=8)
+    rank_bench.add_argument("--k", type=int, default=3)
+    rank_bench.add_argument("--seed", type=int, default=0)
+    rank_bench.set_defaults(func=cmd_rank_benchmark)
 
     export = sub.add_parser("export")
     export.add_argument("--run", required=True)

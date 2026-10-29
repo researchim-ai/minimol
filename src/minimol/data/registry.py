@@ -25,7 +25,7 @@ REGISTRY_COLUMNS = [
     "decision",
     "notes",
 ]
-DECISIONS = {"APPROVED", "REVIEW_REQUIRED", "REJECTED", "INTERNAL_ONLY"}
+DECISIONS = {"APPROVED", "LOCAL_USE", "REVIEW_REQUIRED", "REJECTED", "INTERNAL_ONLY"}
 UNKNOWN_LICENSES = {"", "unknown", "unverified", "na", "n/a"}
 
 
@@ -52,6 +52,10 @@ def validate_registry(path: str | Path) -> list[str]:
             errors.append(f"{record.source}: APPROVED requires a named license")
         if decision == "APPROVED" and str(record.commercial_use).strip().lower() in {"no", "unknown"}:
             errors.append(f"{record.source}: APPROVED commercial_use must be yes")
+        if decision == "LOCAL_USE" and license_name in UNKNOWN_LICENSES:
+            errors.append(f"{record.source}: LOCAL_USE requires a named license")
+        if decision == "LOCAL_USE" and str(record.derivative_redistribution).strip().lower() != "no":
+            errors.append(f"{record.source}: LOCAL_USE forbids redistribution of the downloaded tables")
     return errors
 
 

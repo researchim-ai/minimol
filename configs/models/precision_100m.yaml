@@ -1,0 +1,14 @@
+model:
+  preset: precision_100m
+  param_budget: 100000000
+train:
+  seed: 11
+  batch_size_per_gpu: 4
+  epochs: 20
+  lr: 0.0001
+  weight_decay: 0.01
+  early_stopping_patience: 10
+  grad_clip: 1.0
+data:
+  path: data/processed/precision_sample/data.parquet
+note: Full fusion stays a research model. Synthetic pairs are not a clinical delta.

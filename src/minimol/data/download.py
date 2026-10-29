@@ -18,7 +18,8 @@ def select_files_within_budget(files: list[dict], max_bytes: int) -> list[dict]:
 
 
 def assert_download_allowed(decision: str, revision: str, license_name: str) -> None:
-    if decision != "APPROVED":
+    # LOCAL_USE is a local training cache. It does not approve redistribution.
+    if decision not in {"APPROVED", "LOCAL_USE"}:
         raise LicenseError(f"download blocked: decision={decision}")
     if not license_name or license_name.strip().lower() in {"unknown", "unverified"}:
         raise LicenseError("download blocked: license is not named")

@@ -1,0 +1,32 @@
+experiment: reg_5m_malinois_v0
+model:
+  kind: dilated_cnn
+  preset: "5m"
+  param_budget: 5000000
+  rc_augment: false
+  n_outputs: 3
+  output_names: [K562, HepG2, SK-N-SH]
+train:
+  seed: 42
+  batch_size_per_gpu: 128
+  accumulation_steps: 1
+  precision: bf16
+  optimizer: adamw
+  lr: 0.0003
+  weight_decay: 0.01
+  epochs: 35
+  scheduler: cosine
+  early_stopping_patience: 7
+  grad_clip: 1.0
+  max_steps: null
+  device: auto
+loss:
+  type: huber
+  delta: 1.0
+  inverse_variance_weights: false
+eval:
+  metrics: [spearman, pearson, mae, rmse]
+  split: validation
+data:
+  path: data/processed/malinois/data.parquet
+  max_length: 256

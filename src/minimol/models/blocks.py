@@ -123,17 +123,19 @@ def pool_mean_and_attention(
 ) -> torch.Tensor:
     """Sum of mean pooling and attention pooling. Output width equals hidden width."""
 
-    summed = hidden.new_zeros(n_graphs, hidden.size(-1))
-    summed.index_add_(0, batch, hidden)
-    ones = hidden.new_ones(hidden.size(0))
-    counts = hidden.new_zeros(n_graphs).index_add_(0, batch, ones).clamp(min=1.0).unsqueeze(-1)
+    # Pool in float32. Autocast can make the gate bf16 while the accumulator stays fp32.
+    hidden_f = hidden.float()
+    summed = hidden_f.new_zeros(n_graphs, hidden_f.size(-1))
+    summed.index_add_(0, batch, hidden_f)
+    ones = hidden_f.new_ones(hidden_f.size(0))
+    counts = hidden_f.new_zeros(n_graphs).index_add_(0, batch, ones).clamp(min=1.0).unsqueeze(-1)
     mean = summed / counts
-    scores = gate(hidden).squeeze(-1)
-    maxes = torch.full((n_graphs,), -1.0e9, device=hidden.device, dtype=hidden.dtype)
+    scores = gate(hidden).float().squeeze(-1)
+    maxes = torch.full((n_graphs,), -1.0e9, device=hidden.device, dtype=scores.dtype)
     maxes.scatter_reduce_(0, batch, scores, reduce="amax", include_self=True)
     weights = torch.exp(scores - maxes[batch])
-    denom = hidden.new_zeros(n_graphs).index_add_(0, batch, weights).clamp(min=1.0e-9)
+    denom = hidden_f.new_zeros(n_graphs).index_add_(0, batch, weights).clamp(min=1.0e-9)
     alpha = weights / denom[batch]
-    attended = hidden.new_zeros(n_graphs, hidden.size(-1))
-    attended.index_add_(0, batch, hidden * alpha.unsqueeze(-1))
-    return mean + attended
+    attended = hidden_f.new_zeros(n_graphs, hidden_f.size(-1))
+    attended.index_add_(0, batch, hidden_f * alpha.unsqueeze(-1))
+    return (mean + attended).to(dtype=hidden.dtype)

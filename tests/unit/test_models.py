@@ -61,7 +61,25 @@ def test_shapes_and_receptive_field():
     assert lone.shape == (1, 16)
 
 
-def test_ordinal_probabilities_sum_to_one():
+def test_graph_pool_survives_bf16_autocast():
+    model = build_gine(
+        8,
+        4,
+        preset="5m",
+        task_names=["t"],
+        n_assays=0,
+        hidden=16,
+        depth=1,
+        expansion=1,
+        dropout=0.0,
+    )
+    node = torch.randn(3, 8)
+    edges = torch.tensor([[0, 1], [1, 0]])
+    attr = torch.randn(2, 4)
+    batch = torch.zeros(3, dtype=torch.long)
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        pred = model(node, edges, attr, batch, 1)
+    assert torch.isfinite(pred["t"].float()).all()
     head = OrdinalHead(8, n_classes=4)
     hidden = torch.randn(5, 8)
     probs = head.class_probabilities(hidden)

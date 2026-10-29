@@ -1,6 +1,7 @@
 """Seed Python, NumPy, and PyTorch.
 
-Deterministic cuDNN flags do not guarantee bit-identical GPU kernels.
+Deterministic cuDNN is off unless requested. Dilated convolutions get much
+slower with it, and those flags still do not make GPU kernels bit-identical.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import random
 import numpy as np
 
 
-def set_seed(seed: int, deterministic: bool = True) -> None:
+def set_seed(seed: int, deterministic: bool = False) -> None:
     os.environ["PYTHONHASHSEED"] = str(int(seed))
     random.seed(int(seed))
     np.random.seed(int(seed))

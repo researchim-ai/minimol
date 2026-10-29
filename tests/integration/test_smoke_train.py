@@ -59,6 +59,63 @@ def test_tiny_reg_and_cds_smoke(tmp_path):
     assert cds["teacher_kind"] == "synthetic_noisy_label"
 
 
+def test_eval_reloads_reg_checkpoint(tmp_path):
+    from minimol.data.build import build_dataset
+    from minimol.evaluation.reload import evaluate_reg_checkpoint
+    from minimol.training.train_reg import train_reg
+
+    build_dataset("synthetic_reg", tmp_path / "reg", limit=20, seed=5)
+    train_reg(
+        {
+            "model": {"preset": "5m", "overrides": {"channels": 16, "n_blocks": 2, "dropout": 0.0}},
+            "train": {
+                "seed": 5,
+                "epochs": 1,
+                "max_steps": 1,
+                "batch_size_per_gpu": 8,
+                "lr": 3e-4,
+                "weight_decay": 0.0,
+                "early_stopping_patience": 2,
+                "grad_clip": 1.0,
+                "accumulation_steps": 1,
+                "precision": "fp32",
+                "device": "cpu",
+            },
+            "loss": {"delta": 1.0},
+        },
+        tmp_path / "reg" / "data.parquet",
+        tmp_path / "reg_out",
+    )
+    report = evaluate_reg_checkpoint(
+        tmp_path / "reg_out" / "checkpoint_best.pt",
+        tmp_path / "reg" / "data.parquet",
+        tmp_path / "eval_reg",
+        repeats=2,
+    )
+    assert report["split"] == "validation"
+    assert report["clinical_use"] is False
+    assert report["latency"]["p50_s"] >= 0
+    assert (tmp_path / "eval_reg" / "metrics.json").exists()
+
+
+def test_tiny_precision_smoke(tmp_path):
+    from minimol.data.build import build_dataset
+    from minimol.training.train_precision import train_precision
+
+    build_dataset("synthetic_precision", tmp_path / "precision", seed=2)
+    payload = train_precision(
+        {
+            "model": {"preset": "tiny"},
+            "train": {"seed": 1, "epochs": 1, "max_steps": 1, "batch_size_per_gpu": 4, "lr": 1e-3, "device": "cpu"},
+        },
+        tmp_path / "precision" / "data.parquet",
+        tmp_path / "precision_out",
+    )
+    assert payload["clinical_use"] is False
+    assert payload["directions"] == ["decrease", "no_change", "increase"]
+    assert "Synthetic matched pairs" in payload["note"]
+
+
 def test_tiny_bind_smoke(tmp_path):
     from minimol.data.build import build_dataset
     from minimol.training.train_bind import train_bind

@@ -27,9 +27,18 @@ def collect_reg_predictions(model, loader, scaler, device) -> dict:
     }
 
 
-def reg_metric_value(report: dict) -> float | None:
-    if report.get("macro_spearman") is not None:
-        return float(report["macro_spearman"])
-    if report.get("macro_mae") is None:
-        return None
-    return float(-report["macro_mae"])
+def reg_metric_value(report: dict) -> dict:
+    """Checkpoint score is negative MAE.
+
+    Spearman on a handful of validation rows can prefer an early epoch whose
+    predictions are shifted by several units. MAE keeps the weights on the
+    label scale. Spearman is still recorded and reported.
+    """
+
+    mae = report.get("macro_mae")
+    spearman = report.get("macro_spearman")
+    return {
+        "value": None if mae is None else -float(mae),
+        "val_mae": mae,
+        "val_spearman": spearman,
+    }

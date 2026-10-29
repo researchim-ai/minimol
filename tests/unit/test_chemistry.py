@@ -68,6 +68,7 @@ def test_download_budget_and_license_gate():
         assert_download_allowed("REVIEW_REQUIRED", "abc", "CC-BY-4.0")
     with pytest.raises(MinimolError):
         assert_download_allowed("APPROVED", "UNVERIFIED", "CC-BY-4.0")
+    assert_download_allowed("LOCAL_USE", "e7310a37e760ebf85564e8f1a94c8bd0ef25e018", "Gosai2024-Nature-supplementary-terms")
 
 
 def test_endpoint_pooling_and_pocket_proxy():

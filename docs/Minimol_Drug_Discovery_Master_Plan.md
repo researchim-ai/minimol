@@ -587,3 +587,12 @@ Every released artifact must ship:
 ---
 
 **Final go/no-go:** release candidate accepted only if (a) legal/data gates pass, (b) endpoint and split correctness verified, (c) measurable scientific or economic advantage against baseline survives independent test, (d) calibrated abstention and clear limitations, (e) fully repeatable on stated hardware. Otherwise publish as exploratory research, not commercial drug-discovery predictor.
+
+
+## Актуализация задания по результатам обучения — 29 октября 2026
+
+Обязательный ближайший этап: [исправление и улучшение обучения](Training_Recovery_Plan.md).
+Документ фиксирует обнаруженную ошибку головы Reg, исправление накопления
+градиентов, совместимость старых чекпоинтов, повторное обучение Reg-5M,
+диагностику ADMET по endpoint и критерии перехода к большим моделям.
+Чеклист и критерии приёмки из этого дополнения входят в настоящее ТЗ.

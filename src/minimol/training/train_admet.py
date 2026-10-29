@@ -29,6 +29,9 @@ ARCH_KEYS = {"hidden", "depth", "expansion", "dropout"}
 
 
 def pivot_chem(frame: pd.DataFrame):
+    split_counts = frame.assign(split=frame["split"].map(canonicalize_split)).groupby("smiles_canonical")["split"].nunique()
+    if (split_counts > 1).any():
+        raise MinimolError("a canonical molecule occurs in multiple splits; repair the split before training")
     endpoints = sorted(frame["endpoint"].unique())
     rows = []
     for smiles, group in frame.groupby("smiles_canonical", sort=True):
@@ -93,10 +96,26 @@ def _collate(endpoints):
     return collate
 
 
-def _kinds(endpoints):
+def admet_selection_value(scaled_maes: list[float], aurocs: list[float]) -> float | None:
+    """Higher is better. Regression and classification both vote when both are trained."""
+
+    parts = [-float(value) for value in scaled_maes] + [float(value) for value in aurocs]
+    if not parts:
+        return None
+    return float(np.mean(parts))
+
+
+ADMET_CHECKPOINT_RULE = (
+    "mean of -validation MAE/train_std for regression endpoints and AUROC for classification endpoints"
+)
+
+
+def _kinds(endpoints, declared: dict | None = None):
     kinds = {}
     for name in endpoints:
-        if name in ASSAYS:
+        if declared and name in declared:
+            kinds[name] = declared[name]
+        elif name in ASSAYS:
             kinds[name] = task_kind(name)
         else:
             kinds[name] = "regression"
@@ -108,7 +127,10 @@ def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
     if "official_split" in frame.columns:
         raise MinimolError("official_split handling belongs to the splitter; do not relabel test here")
     rows, endpoints = pivot_chem(frame)
-    kinds = _kinds(endpoints)
+    declared = None
+    if "task_kind" in frame.columns:
+        declared = {str(name): str(kind) for name, kind in frame.groupby("endpoint")["task_kind"].first().items()}
+    kinds = _kinds(endpoints, declared)
     train_rows = [row for row in rows if row["split"] == "train"]
     val_rows = [row for row in rows if row["split"] == "validation"]
     if not train_rows:
@@ -175,11 +197,24 @@ def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
 
     def metric_fn(module, loader):
         report = _evaluate(module, loader, device, endpoints, kinds, scaler)
-        values = [item["spearman"] for item in report.values() if item.get("spearman") is not None]
-        if values:
-            return float(np.mean(values))
-        scores = [item["auroc"] for item in report.values() if item.get("auroc") is not None]
-        return float(np.mean(scores)) if scores else None
+        scaled_maes = []
+        raw_maes = []
+        for index, name in enumerate(endpoints):
+            item = report[name]
+            if kinds[name] != "regression" or item.get("mae") is None:
+                continue
+            scale = max(abs(float(scaler.std[index])), 1e-6)
+            raw_maes.append(float(item["mae"]))
+            scaled_maes.append(float(item["mae"]) / scale)
+        spearmans = [item["spearman"] for item in report.values() if item.get("spearman") is not None]
+        aurocs = [item["auroc"] for item in report.values() if item.get("auroc") is not None]
+        value = admet_selection_value(scaled_maes, aurocs)
+        return {
+            "value": value,
+            "val_mae": None if not scaled_maes else float(np.mean(scaled_maes)),
+            "val_spearman": None if not spearmans else float(np.mean(spearmans)),
+            "val_auroc": None if not aurocs else float(np.mean(aurocs)),
+        }
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -198,6 +233,7 @@ def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
         "clinical_use": False,
         "official_tdc": False,
         "data_sha256": sha256_file(data_path),
+        "checkpoint_rule": ADMET_CHECKPOINT_RULE,
     }
     result = fit(
         model,
@@ -227,6 +263,7 @@ def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
         "endpoints": final,
         "history": result["history"],
         "steps": result["steps"],
+        "checkpoint_rule": metadata["checkpoint_rule"],
         "research_use_only": True,
         "clinical_use": False,
         "official_tdc": False,

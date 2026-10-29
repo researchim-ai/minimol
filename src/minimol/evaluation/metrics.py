@@ -95,6 +95,31 @@ def regression_report(y, yhat, mask=None, names=None) -> dict:
     }
 
 
+def prediction_scale(y, yhat, mask, names: list[str]) -> dict:
+    """Compare prediction location and spread with the labels, per assay."""
+
+    actual = np.asarray(y, dtype=np.float64)
+    pred = np.asarray(yhat, dtype=np.float64)
+    valid = np.asarray(mask, dtype=bool)
+    report = {}
+    for index, name in enumerate(names):
+        chosen = valid[:, index] & np.isfinite(actual[:, index]) & np.isfinite(pred[:, index])
+        labels = actual[chosen, index]
+        guesses = pred[chosen, index]
+        label_std = float(labels.std()) if labels.size else 0.0
+        pred_std = float(guesses.std()) if guesses.size else 0.0
+        report[name] = {
+            "n": int(labels.size),
+            "label_mean": None if labels.size == 0 else float(labels.mean()),
+            "label_std": None if labels.size == 0 else label_std,
+            "pred_mean": None if guesses.size == 0 else float(guesses.mean()),
+            "pred_std": None if guesses.size == 0 else pred_std,
+            "mean_shift": None if labels.size == 0 else float(guesses.mean() - labels.mean()),
+            "std_ratio": None if label_std <= 0 else float(pred_std / label_std),
+        }
+    return report
+
+
 def brier(probs, labels, mask=None) -> float | None:
     pred, actual = _pair(probs, labels, mask)
     if pred.size == 0:

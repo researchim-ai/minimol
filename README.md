@@ -64,3 +64,42 @@ minimol serve
 ## Чего код намеренно не делает
 
 Не объявляет клиническую пригодность. Не подменяет экспериментальную метку ответом учителя. Не считает сжатие 1.2B до 10M успехом без независимого теста. Не выпускает коммерческую модель командой `release-check`: юридическая и научная проверка остаются `pending`.
+
+## Regulatory decision pilot
+
+Реализован локальный конвейер типизированных вопросов к ДНК: `noul`
+(вероятность превышения порога log2FC), `score` (распределение по интервалам),
+выбор из двух кандидатов и выбор assay. Один вызов encoder обслуживает несколько
+вопросов. Это исследовательский прототип с фиксированной схемой вопросов.
+
+```bash
+make decide-prepare                  # нужны локальные Malinois и parent checkpoint
+make decide-train DECIDE_SEED=11      # новый каталог; повторить для 23 и 47
+make decide-summary
+make decide-serve                    # http://127.0.0.1:8097/reg-decide
+```
+
+Существующие результаты не перезаписываются: для нового эксперимента задайте
+`DECIDE_RUN=artifacts/new_run`. Продолжение нового checkpoint с полным состоянием:
+`python -m minimol.cli decide train --config configs/decision/reg_pilot.yaml --cache artifacts/reg_decide_features_v1 --out artifacts/new_run --resume artifacts/new_run/checkpoint_last.pt`.
+Старые checkpoint без полного состояния требуют отдельного warm-start эксперимента.
+
+```python
+from minimol.decide import RegDecider
+
+model = RegDecider.load("artifacts/reg_decide_seed11")
+result = model.predict({
+    "candidates": [{"id": "candidate", "sequence": sequence}],
+    "questions": [{"id": "q", "kind": "noul", "candidate_id": "candidate",
+                   "assay": "K562", "threshold": 0.75}],
+})
+```
+
+`sequence` — ваша локальная ДНК. POST `/v1/regulatory/decide` принимает ту же
+структуру. По умолчанию используется `calibrated_regression`: три head-seed дали
+смешанный результат. Экспериментальная голова включается явно через
+`RegDecider.load(..., backend="trained")` или `serve --decide-backend trained`.
+Порог abstention — пользовательская политика, не гарантия верхней границы риска.
+Данные, признаки, предсказания и веса сохраняются в игнорируемых локальных каталогах;
+ограничение Malinois `LOCAL_USE` сохраняется. Детали и результаты:
+[Decision Model Next Stage](docs/Decision_Model_Next_Stage.md).

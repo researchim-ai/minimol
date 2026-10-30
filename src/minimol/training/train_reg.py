@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 from minimol.data.normalize import LabelScaler, assay_order, audit_reg_frame, pivot_reg
 from minimol.data.sequences import maybe_reverse_complement_batch, one_hot_sequence
 from minimol.errors import MinimolError
+from minimol.evaluation.bootstrap import grouped_macro_mae_ci
 from minimol.evaluation.metrics import prediction_scale, regression_report
 from minimol.evaluation.reg import reg_metric_value
 from minimol.jsonutil import write_json
@@ -134,7 +135,8 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
     model_cfg = config.get("model", {})
     overrides = {key: value for key, value in (model_cfg.get("overrides") or {}).items() if key in ARCH_KEYS}
     preset = model_cfg.get("preset", "5m")
-    model = MinimolReg(preset, n_assays=len(assays), **overrides)
+    padding_policy = str(model_cfg.get("padding_policy", "mask_aware"))
+    model = MinimolReg(preset, n_assays=len(assays), padding_policy=padding_policy, **overrides)
     use_weights = bool(config.get("loss", {}).get("inverse_variance_weights", False))
     train_loader, val_loader, scaler, assays = _loaders(
         rows,
@@ -160,9 +162,10 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
 
     def loss_fn(module, batch):
         encoded = batch["x"]
+        pad_mask = batch["pad_mask"]
         if rc_augment and module.training:
-            encoded = maybe_reverse_complement_batch(encoded, True)
-        pred = module(encoded, batch["pad_mask"])
+            encoded, pad_mask = maybe_reverse_complement_batch(encoded, True, pad_mask=pad_mask)
+        pred = module(encoded, pad_mask)
         return masked_huber(pred, batch["y"], batch["y_mask"], delta=delta, sample_weight=batch["weight"])
 
     def metric_fn(module, loader):
@@ -186,12 +189,16 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
     metadata = {
         "task": "reg",
         "head_kind": model.head_kind,
+        "padding_policy": model.padding_policy,
         "preset": preset,
         "n_assays": len(assays),
         "overrides": overrides,
         "assay_names": assays,
         "scaler": scaler.state_dict(),
         "seed": seed,
+        "training_seed": seed,
+        "split_seed": (config.get("data") or {}).get("split_seed"),
+        "split_source": (config.get("data") or {}).get("split_source", "as_stored_in_table"),
         "param_count": count_parameters(model),
         "git_sha": git_sha(),
         "research_use_only": True,
@@ -219,15 +226,21 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
         checkpoint_dir=out_dir,
         metadata=metadata,
         base_lr=lr,
+        resume_from=train_cfg.get("resume_from"),
     )
     load_checkpoint(out_dir / "checkpoint_best.pt", model, map_location=device)
     final = None
     if val_loader is not None:
-        final = _report(model, val_loader, scaler, device, assays)
+        val_groups = [row["group_id"] for row in rows if row["split"] == "validation"]
+        final = _report(model, val_loader, scaler, device, assays, groups=val_groups)
         final["per_assay"] = final["per_target"]
     payload = {
         "task": "reg",
         "head_kind": model.head_kind,
+        "padding_policy": model.padding_policy,
+        "training_seed": seed,
+        "split_seed": metadata["split_seed"],
+        "split_source": metadata["split_source"],
         "config": config,
         "n_train_sequences": len(train_loader.dataset),
         "n_validation_sequences": 0 if val_loader is None else len(val_loader.dataset),
@@ -250,7 +263,7 @@ def train_reg(config: dict, data_path: Path, out_dir: Path) -> dict:
     return payload
 
 
-def _report(model, loader, scaler, device, assays):
+def _report(model, loader, scaler, device, assays, groups=None):
     actuals, preds, masks = [], [], []
     model.eval()
     with torch.no_grad():
@@ -265,6 +278,8 @@ def _report(model, loader, scaler, device, assays):
     mask = np.concatenate(masks)
     report = regression_report(actual, pred, mask, assays)
     report["prediction_scale"] = prediction_scale(actual, pred, mask, assays)
+    if groups is not None and len(groups) == len(actual):
+        report["grouped_mae_ci"] = grouped_macro_mae_ci(actual, pred, mask, groups)
     return report
 
 

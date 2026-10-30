@@ -101,8 +101,12 @@ def create_app(
     rate_limit_per_minute: int = 0,
     max_reg_length: int = 2000,
     max_cds_length: int = 8192,
+    decider=None,
 ) -> FastAPI:
     app = FastAPI(title="minimol", version=__version__)
+    from minimol.serving.reg_decide import register_reg_decide
+
+    register_reg_decide(app, decider)
     limiter = RateLimiter(rate_limit_per_minute)
 
     @app.middleware("http")
@@ -127,7 +131,7 @@ def create_app(
             "version": __version__,
             "research_use_only": True,
             "auth_enabled": bool(token),
-            "weights": {"reg": reg is not None, "cds": cds is not None},
+            "weights": {"reg": reg is not None, "cds": cds is not None, "reg_decide": decider is not None},
         }
 
     @app.post("/v1/regulatory/predict")

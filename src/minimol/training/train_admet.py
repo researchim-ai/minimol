@@ -15,7 +15,13 @@ from minimol.data.assays import ASSAYS, task_kind
 from minimol.data.featurize import atom_feature_dim, bond_feature_dim, collate_graphs, mol_to_graph
 from minimol.data.normalize import LabelScaler, canonicalize_split
 from minimol.errors import MinimolError
-from minimol.evaluation.metrics import auroc, regression_report
+from minimol.evaluation.metrics import (
+    auprc,
+    auroc,
+    brier,
+    expected_calibration_error,
+    regression_report,
+)
 from minimol.jsonutil import write_json
 from minimol.models.blocks import count_parameters
 from minimol.models.gnn import build_gine
@@ -106,8 +112,46 @@ def admet_selection_value(scaled_maes: list[float], aurocs: list[float]) -> floa
 
 
 ADMET_CHECKPOINT_RULE = (
-    "mean of -validation MAE/train_std for regression endpoints and AUROC for classification endpoints"
+    "per endpoint, the TDC metric from the manifest: -MAE, Spearman, AUROC, or average precision"
 )
+TDC_SELECTION = {
+    "mae": ("mae", -1.0),
+    "spearman": ("spearman", 1.0),
+    "roc-auc": ("auroc", 1.0),
+    "pr-auc": ("auprc", 1.0),
+}
+
+
+def tdc_selection_value(item: dict, metric: str) -> float | None:
+    """Higher is better. PR-AUC is sklearn average precision, matching TDC."""
+
+    spec = TDC_SELECTION.get(str(metric).strip().lower())
+    if spec is None:
+        return None
+    key, sign = spec
+    value = item.get(key)
+    if value is None or not np.isfinite(value):
+        return None
+    return sign * float(value)
+
+
+def load_tdc_metrics(data_path, frame: pd.DataFrame) -> dict[str, str]:
+    metrics: dict[str, str] = {}
+    if "tdc_metric" in frame.columns:
+        for endpoint, metric in frame.groupby("endpoint")["tdc_metric"].first().items():
+            text = str(metric).strip()
+            if text and text.lower() != "nan":
+                metrics[str(endpoint)] = text
+    manifest_path = Path(data_path).parent / "manifest.json"
+    if manifest_path.exists():
+        import json
+
+        manifest = json.loads(manifest_path.read_text())
+        name = manifest.get("benchmark_name")
+        metric = manifest.get("tdc_metric")
+        if name and metric:
+            metrics.setdefault(str(name), str(metric))
+    return metrics
 
 
 def _kinds(endpoints, declared: dict | None = None):
@@ -124,6 +168,7 @@ def _kinds(endpoints, declared: dict | None = None):
 
 def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
     frame = pd.read_parquet(data_path)
+    tdc_metrics = load_tdc_metrics(data_path, frame)
     if "official_split" in frame.columns:
         raise MinimolError("official_split handling belongs to the splitter; do not relabel test here")
     rows, endpoints = pivot_chem(frame)
@@ -208,7 +253,15 @@ def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
             scaled_maes.append(float(item["mae"]) / scale)
         spearmans = [item["spearman"] for item in report.values() if item.get("spearman") is not None]
         aurocs = [item["auroc"] for item in report.values() if item.get("auroc") is not None]
-        value = admet_selection_value(scaled_maes, aurocs)
+        chosen = []
+        for name in endpoints:
+            metric = tdc_metrics.get(name)
+            if not metric:
+                continue
+            selected = tdc_selection_value(report[name], metric)
+            if selected is not None:
+                chosen.append(selected)
+        value = float(np.mean(chosen)) if chosen else admet_selection_value(scaled_maes, aurocs)
         return {
             "value": value,
             "val_mae": None if not scaled_maes else float(np.mean(scaled_maes)),
@@ -232,7 +285,10 @@ def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
         "research_use_only": True,
         "clinical_use": False,
         "official_tdc": False,
+        "tdc_metrics": tdc_metrics,
         "data_sha256": sha256_file(data_path),
+        "training_seed": seed,
+        "split_seed": (config.get("data") or {}).get("split_seed"),
         "checkpoint_rule": ADMET_CHECKPOINT_RULE,
     }
     result = fit(
@@ -267,9 +323,15 @@ def train_admet(config: dict, data_path: Path, out_dir: Path) -> dict:
         "research_use_only": True,
         "clinical_use": False,
         "official_tdc": False,
+        "tdc_metrics": tdc_metrics,
+        "training_seed": seed,
         "data_sha256": metadata["data_sha256"],
         "git_sha": metadata["git_sha"],
-        "note": "Metrics describe the training table. Computed proxies are not experimental ADMET.",
+        "note": (
+            "Validation metrics. Canonical SMILES that crossed published splits were quarantined "
+            "at import, so the test rows are not an unchanged TDC test file. "
+            "Scaffold overlap is recorded separately and is not treated as a duplicate label."
+        ),
     }
     write_json(out_dir / "metrics.json", payload)
     return payload
@@ -307,11 +369,22 @@ def _evaluate(model, loader, device, endpoints, kinds, scaler):
         y = np.concatenate(store[name]["y"])
         yhat = np.concatenate(store[name]["yhat"])
         mask = np.concatenate(store[name]["mask"]) > 0.5
+        observed = y[mask]
         if kinds[name] == "binary":
-            report[name] = {"auroc": auroc(y, yhat, mask), "task": "binary"}
+            report[name] = {
+                "auroc": auroc(y, yhat, mask),
+                "auprc": auprc(y, yhat, mask),
+                "brier": brier(yhat, y, mask),
+                "ece": expected_calibration_error(yhat, y, mask=mask),
+                "n": int(mask.sum()),
+                "positive_fraction": None if observed.size == 0 else float(observed.mean()),
+                "task": "binary",
+                "pr_auc_implementation": "sklearn.metrics.average_precision_score",
+            }
         else:
             metrics = regression_report(y, yhat, mask, [name])["per_target"][name]
             metrics["task"] = "regression"
+            metrics["n"] = int(mask.sum())
             report[name] = metrics
     return report
 

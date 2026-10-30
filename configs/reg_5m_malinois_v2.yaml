@@ -3,6 +3,7 @@ model:
   kind: dilated_cnn
   preset: "5m"
   param_budget: 5000000
+  padding_policy: mask_aware
   overrides:
     head_kind: nonlinear
   rc_augment: false
@@ -32,3 +33,5 @@ eval:
 data:
   path: data/processed/malinois/data.parquet
   max_length: 256
+  split_seed: null
+  split_source: published_chromosome_split

@@ -596,3 +596,9 @@ Every released artifact must ship:
 градиентов, совместимость старых чекпоинтов, повторное обучение Reg-5M,
 диагностику ADMET по endpoint и критерии перехода к большим моделям.
 Чеклист и критерии приёмки из этого дополнения входят в настоящее ТЗ.
+
+
+## Следующий этап после Reg: обучаемые решения
+
+Актуальные результаты, восстановленная оценка checkpoint и задание на
+question-conditioned Reg Decide: [Decision_Model_Next_Stage.md](Decision_Model_Next_Stage.md).

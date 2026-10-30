@@ -136,6 +136,52 @@ def cmd_train_ridge(args) -> int:
     return 0
 
 
+def cmd_decide_prepare(args) -> int:
+    from minimol.data.reg_decisions import prepare_cache
+
+    prepare_cache(Path(args.checkpoint), Path(args.data), Path(args.out),
+                  train_limit=args.train_limit, validation_limit=args.validation_limit, device=args.device)
+    return 0
+
+
+def cmd_decide_train(args) -> int:
+    from minimol.config import load_yaml
+    from minimol.training.train_reg_decide import train_reg_decide
+
+    config = load_yaml(args.config)
+    if args.seed is not None:
+        config.setdefault("train", {})["seed"] = args.seed
+    if args.resume is not None:
+        config.setdefault("train", {})["resume_from"] = args.resume
+    report = train_reg_decide(config, Path(args.cache or config["cache"]), Path(args.out))
+    print(report["decision"])
+    return 0
+
+
+def cmd_decide_summary(args) -> int:
+    from minimol.evaluation.decide_experiment import question_controls, summarize_decide_runs
+
+    report = summarize_decide_runs([Path(run) for run in args.runs], Path(args.out))
+    if args.cache:
+        from minimol.jsonutil import write_json
+        report["controls"] = question_controls(Path(args.cache), Path(args.runs[0]))
+        write_json(args.out, report)
+    print(report["decision"], report["recommended_backend"])
+    return 0
+
+
+def cmd_decide_predict(args) -> int:
+    import json
+
+    from minimol.decide import RegDecider
+    from minimol.jsonutil import write_json
+
+    request = json.loads(Path(args.request).read_text())
+    result = RegDecider.load(args.run, backend=args.backend).predict(request)
+    write_json(args.out, result)
+    return 0
+
+
 def cmd_train_reg(args) -> int:
     from minimol.config import load_yaml
     from minimol.training.train_reg import train_reg
@@ -146,6 +192,8 @@ def cmd_train_reg(args) -> int:
     if getattr(args, "seed", None) is not None:
         config.setdefault("train", {})["seed"] = args.seed
     data = args.data or config.get("data", {}).get("path")
+    if getattr(args, "resume", None):
+        config.setdefault("train", {})["resume_from"] = args.resume
     train_reg(config, Path(data), Path(args.out))
     return 0
 
@@ -397,7 +445,11 @@ def cmd_serve(args) -> int:
 
     reg = load_reg_checkpoint(args.reg) if args.reg else None
     cds = load_cds_checkpoint(args.cds) if args.cds else None
-    app = create_app(reg=reg, cds=cds, token=args.token, rate_limit_per_minute=args.rate_limit)
+    decider = None
+    if getattr(args, "decide_run", None):
+        from minimol.decide import RegDecider
+        decider = RegDecider.load(args.decide_run, backend=args.decide_backend)
+    app = create_app(decider=decider, reg=reg, cds=cds, token=args.token, rate_limit_per_minute=args.rate_limit)
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
@@ -483,6 +535,8 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument("--max-steps", type=int)
         if name in {"admet", "reg"}:
             item.add_argument("--seed", type=int)
+        if name == "reg":
+            item.add_argument("--resume")
         item.set_defaults(func=func)
     for name, func in (
         ("bind", cmd_train_bind),
@@ -573,6 +627,35 @@ def build_parser() -> argparse.ArgumentParser:
     rank_bench.add_argument("--seed", type=int, default=0)
     rank_bench.set_defaults(func=cmd_rank_benchmark)
 
+    decide = sub.add_parser("decide")
+    decide_sub = decide.add_subparsers(dest="decide_action", required=True)
+    prepare = decide_sub.add_parser("prepare")
+    prepare.add_argument("--checkpoint", required=True)
+    prepare.add_argument("--data", required=True)
+    prepare.add_argument("--out", required=True)
+    prepare.add_argument("--train-limit", type=int, default=40000)
+    prepare.add_argument("--validation-limit", type=int, default=20000)
+    prepare.add_argument("--device", default="auto")
+    prepare.set_defaults(func=cmd_decide_prepare)
+    decision_train = decide_sub.add_parser("train")
+    decision_train.add_argument("--config", required=True)
+    decision_train.add_argument("--cache")
+    decision_train.add_argument("--out", required=True)
+    decision_train.add_argument("--seed", type=int)
+    decision_train.add_argument("--resume")
+    decision_train.set_defaults(func=cmd_decide_train)
+    summary = decide_sub.add_parser("summary")
+    summary.add_argument("--runs", nargs="+", required=True)
+    summary.add_argument("--out", required=True)
+    summary.add_argument("--cache")
+    summary.set_defaults(func=cmd_decide_summary)
+    predict = decide_sub.add_parser("predict")
+    predict.add_argument("--run", required=True)
+    predict.add_argument("--request", required=True)
+    predict.add_argument("--out", required=True)
+    predict.add_argument("--backend", choices=["trained", "calibrated_regression"], default="calibrated_regression")
+    predict.set_defaults(func=cmd_decide_predict)
+
     export = sub.add_parser("export")
     export.add_argument("--run", required=True)
     export.add_argument("--format", default="onnx")
@@ -597,6 +680,8 @@ def build_parser() -> argparse.ArgumentParser:
     release.set_defaults(func=cmd_release)
 
     serve = sub.add_parser("serve")
+    serve.add_argument("--decide-run")
+    serve.add_argument("--decide-backend", choices=["trained", "calibrated_regression"], default="calibrated_regression")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reg")

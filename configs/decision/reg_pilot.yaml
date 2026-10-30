@@ -1,0 +1,12 @@
+model:
+  hidden: 128
+  encoder_mode: frozen
+train:
+  seed: 11
+  epochs: 20
+  patience: 5
+  batch_size: 256
+  lr: 0.001
+  device: auto
+cache: artifacts/reg_decide_features_v1
+primary_metric: object_macro_noul_brier_at_unseen_thresholds

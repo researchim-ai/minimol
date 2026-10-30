@@ -15,6 +15,42 @@ from minimol.data.split import assert_genomic_windows_grouped
 from minimol.errors import MinimolError, SplitLeakageError
 
 
+def cross_split_identity(frame: pd.DataFrame) -> dict:
+    """Shared identities after standardization. A scaffold match is not a duplicate label."""
+
+    def shared(column: str) -> list[dict]:
+        if column not in frame.columns or "split" not in frame.columns:
+            return []
+        hits = []
+        usable = frame.dropna(subset=[column])
+        published = usable[usable["split"].astype(str).isin(["train", "validation", "test"])]
+        for value, part in published.groupby(column):
+            splits = sorted({str(item) for item in part["split"].tolist()})
+            if len(splits) > 1:
+                hits.append({column: str(value), "splits": splits, "n": int(len(part))})
+        return hits
+
+    quarantine = 0
+    if "split" in frame.columns:
+        quarantine = int((frame["split"].astype(str) == "quarantine").sum())
+    return {
+        "inchikey_cross_split": shared("inchikey"),
+        "scaffold_cross_split": shared("scaffold_id"),
+        "n_quarantine_rows": quarantine,
+        "official_test_unchanged": quarantine == 0,
+        "standardization_policy": (
+            "RDKit canonical isomeric SMILES; stereochemistry kept; "
+            "tautomers not canonicalized; salts recorded on the standardized record"
+        ),
+        "benchmark_protocol": "published TDC train_val and test files; train/validation from the scaffold splitter",
+        "note": (
+            "A shared InChIKey is the same molecule after standardization. "
+            "A shared scaffold is a chemical series, not a duplicated measurement. "
+            "Rows moved to quarantine are not part of an unchanged official test."
+        ),
+    }
+
+
 def split_audit(manifest_path: Path, report_path: Path | None = None) -> dict:
     manifest = read_manifest(manifest_path)
     data_path = Path(manifest_path).parent / manifest["data_file"]

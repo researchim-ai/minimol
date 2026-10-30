@@ -81,20 +81,26 @@ def maybe_reverse_complement_batch(
     encoded: torch.Tensor,
     enabled: bool,
     coin: torch.Tensor | None = None,
-) -> torch.Tensor:
+    pad_mask: torch.Tensor | None = None,
+):
     """Training-time RC augmentation. Labels are unchanged; default is off.
 
     Regulatory assays are often stranded. Enable this only when the assay
-    definition says orientation does not matter.
+    definition says orientation does not matter. When a pad mask is passed,
+    it is flipped with the sequence so padded coordinates stay padded.
     """
 
     if not enabled:
-        return encoded
+        return (encoded, pad_mask) if pad_mask is not None else encoded
     if coin is None:
         coin = torch.rand(encoded.shape[0], device=encoded.device)
-    mask = coin < 0.5
-    if not bool(mask.any()):
-        return encoded
+    chosen = coin < 0.5
+    if not bool(chosen.any()):
+        return (encoded, pad_mask) if pad_mask is not None else encoded
     flipped = reverse_complement_one_hot(encoded)
-    mask_b = mask.view(-1, 1, 1)
-    return torch.where(mask_b, flipped, encoded)
+    chosen_b = chosen.view(-1, 1, 1)
+    encoded = torch.where(chosen_b, flipped, encoded)
+    if pad_mask is None:
+        return encoded
+    flipped_mask = torch.flip(pad_mask, dims=(-1,))
+    return encoded, torch.where(chosen.view(-1, 1), flipped_mask, pad_mask)

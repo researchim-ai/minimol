@@ -163,6 +163,8 @@ def pivot_reg(df: pd.DataFrame, assays: list[str] | None = None) -> list[dict]:
                 "y": y,
                 "mask": mask,
                 "se": se,
+                "chromosome": str(group["chromosome"].iloc[0]) if "chromosome" in group.columns else "",
+                "label_quality": str(group["label_quality"].iloc[0]) if "label_quality" in group.columns else "",
             }
         )
     return rows

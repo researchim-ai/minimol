@@ -69,6 +69,8 @@ class LeakageReport:
     inchikey_cross_split: list[dict] = field(default_factory=list)
     threshold: float = 0.8
     k: int = 6
+    near_search: str = "not_run"
+    n_near_candidates: int = 0
     notes: list[str] = field(default_factory=lambda: [NEAR_DUPLICATE_RULE])
 
     @property
@@ -88,6 +90,8 @@ class LeakageReport:
             "n_rows": self.n_rows,
             "threshold": self.threshold,
             "k": self.k,
+            "near_search": self.near_search,
+            "n_near_candidates": self.n_near_candidates,
             "exact_cross_split": self.exact_cross_split,
             "rc_cross_split": self.rc_cross_split,
             "group_cross_split": self.group_cross_split,
@@ -169,14 +173,32 @@ def scan_leakage(
                     continue
                 seen_rc.add(key)
                 report.rc_cross_split.append(_pair(index, other, splits=[splits[index], split_other]))
-        pairs = [
-            (i, j)
-            for i in range(len(sequences))
-            for j in range(i + 1, len(sequences))
-            if sequences[i] and sequences[j] and splits[i] != splits[j]
-        ]
-        if len(sequences) > exhaustive_limit:
-            pairs = _minhash_candidates(sequences, splits, k=k, limit=exhaustive_limit)
+        unique = []
+        seen_hash = set()
+        for index, digest in enumerate(hashes):
+            if not sequences[index] or not digest or digest in seen_hash:
+                continue
+            seen_hash.add(digest)
+            unique.append(index)
+        unique_sequences = [sequences[index] for index in unique]
+        unique_splits = [splits[index] for index in unique]
+        if len(unique) > exhaustive_limit:
+            local_pairs = _minhash_candidates(unique_sequences, unique_splits, k=k, limit=exhaustive_limit)
+            pairs = [(unique[left], unique[right]) for left, right in local_pairs]
+            report.near_search = "minhash_approximate"
+            report.notes.append(
+                "Near-duplicate search used MinHash on unique sequences. "
+                "A miss is possible; this is not an exhaustive proof."
+            )
+        else:
+            pairs = [
+                (unique[left], unique[right])
+                for left in range(len(unique))
+                for right in range(left + 1, len(unique))
+                if unique_splits[left] != unique_splits[right]
+            ]
+            report.near_search = "exhaustive"
+        report.n_near_candidates = len(pairs)
         for i, j in pairs:
             score = jaccard(sequences[i], sequences[j], k=k)
             identity = hamming_identity(sequences[i], sequences[j])

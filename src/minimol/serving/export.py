@@ -52,7 +52,12 @@ def export_sequence_model(model: torch.nn.Module, path: Path, length: int, in_ch
             output_names=["prediction"],
             opset_version=17,
         )
-    report = {"path": str(path), "length": length, "parity": None}
+    report = {
+        "path": str(path),
+        "length": length,
+        "parity": None,
+        "padding_policy": getattr(model, "padding_policy", "unpadded_single_sequence"),
+    }
     try:
         import onnxruntime as ort
 

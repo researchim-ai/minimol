@@ -40,6 +40,37 @@ def conv_receptive_field(
     return int(field)
 
 
+def sequence_mask(hidden: torch.Tensor, pad_mask: torch.Tensor | None) -> torch.Tensor:
+    """Zero padded positions. pad_mask True marks real bases and has shape [B, L] or [L]."""
+
+    if pad_mask is None:
+        return hidden
+    mask = pad_mask.to(dtype=hidden.dtype)
+    if hidden.dim() == 3:
+        mask = mask.unsqueeze(1)
+    return hidden * mask
+
+
+def masked_group_norm(norm: nn.GroupNorm, hidden: torch.Tensor, pad_mask: torch.Tensor | None) -> torch.Tensor:
+    """GroupNorm over real positions. A full mask matches nn.GroupNorm."""
+
+    if pad_mask is None or bool(pad_mask.all()):
+        return norm(hidden)
+    batch, channels, length = hidden.shape
+    groups = norm.num_groups
+    per_group = channels // groups
+    grouped = hidden.reshape(batch, groups, per_group, length)
+    valid = pad_mask.to(dtype=hidden.dtype).reshape(batch, 1, 1, length)
+    count = (valid.sum(dim=-1, keepdim=True) * per_group).clamp(min=1.0)
+    mean = (grouped * valid).sum(dim=(2, 3), keepdim=True) / count
+    centered = grouped - mean
+    var = (centered.square() * valid).sum(dim=(2, 3), keepdim=True) / count
+    normalized = (centered * torch.rsqrt(var + norm.eps)).reshape(batch, channels, length)
+    if norm.affine:
+        normalized = normalized * norm.weight.view(1, -1, 1) + norm.bias.view(1, -1, 1)
+    return normalized
+
+
 class ConvStem(nn.Module):
     def __init__(self, in_channels: int, channels: int, dropout: float):
         super().__init__()
@@ -47,8 +78,10 @@ class ConvStem(nn.Module):
         self.norm = group_norm(channels)
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.drop(F.gelu(self.norm(self.conv(x))))
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> torch.Tensor:
+        hidden = self.conv(sequence_mask(x, pad_mask))
+        hidden = masked_group_norm(self.norm, hidden, pad_mask)
+        return sequence_mask(self.drop(F.gelu(hidden)), pad_mask)
 
 
 class ResBlock(nn.Module):
@@ -61,10 +94,12 @@ class ResBlock(nn.Module):
         self.norm2 = group_norm(channels)
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        hidden = self.drop(F.gelu(self.norm1(self.conv1(x))))
-        hidden = self.drop(F.gelu(self.norm2(self.conv2(hidden))))
-        return x + hidden
+    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> torch.Tensor:
+        hidden = self.conv1(sequence_mask(x, pad_mask))
+        hidden = sequence_mask(self.drop(F.gelu(masked_group_norm(self.norm1, hidden, pad_mask))), pad_mask)
+        hidden = self.conv2(hidden)
+        hidden = sequence_mask(self.drop(F.gelu(masked_group_norm(self.norm2, hidden, pad_mask))), pad_mask)
+        return sequence_mask(x + hidden, pad_mask)
 
 
 class AttentionPool(nn.Module):

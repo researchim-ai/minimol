@@ -374,8 +374,17 @@ def _write_tdc_table(name: str, train: pd.DataFrame, valid: pd.DataFrame, test: 
             "split_seed": seed,
             "n_invalid_smiles": dropped,
             "n_smiles_quarantined": int(len(conflict_ids)),
-            "official_tdc": True,
-            "note": "TDC scaffold split kept. Not an RDKit proxy and not a leaderboard submission by itself.",
+            "official_tdc": False,
+            "official_test_unchanged": len(conflict_ids) == 0,
+            "standardization_policy": (
+                "RDKit canonical isomeric SMILES; stereochemistry kept; "
+                "tautomers not canonicalized; salts recorded on the standardized record"
+            ),
+            "note": (
+                "Published TDC test rows stay in the test split unless canonicalization "
+                "put the same molecule in two splits; those rows are quarantined and the "
+                "test is then not an unchanged official file. A shared scaffold is not a duplicate label."
+            ),
             "redistribution": "no",
         },
     )

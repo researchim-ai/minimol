@@ -22,11 +22,21 @@ from minimol.models.presets import REG_PRESETS, resolve_spec
 
 
 class MinimolReg(nn.Module):
-    def __init__(self, preset: str = "5m", n_assays: int = 3, head_kind: str = "nonlinear", **overrides):
+    def __init__(
+        self,
+        preset: str = "5m",
+        n_assays: int = 3,
+        head_kind: str = "nonlinear",
+        padding_policy: str = "mask_aware",
+        **overrides,
+    ):
         super().__init__()
         if head_kind not in {"nonlinear", "legacy_linear"}:
             raise ValueError(f"unknown regulatory head: {head_kind}")
+        if padding_policy not in {"mask_aware", "legacy_n_pad"}:
+            raise ValueError(f"unknown padding policy: {padding_policy}")
         self.head_kind = head_kind
+        self.padding_policy = padding_policy
         self.head_activation = nn.GELU() if head_kind == "nonlinear" else nn.Identity()
         spec = resolve_spec(REG_PRESETS, preset, overrides)
         channels = int(spec["channels"])
@@ -61,9 +71,10 @@ class MinimolReg(nn.Module):
         self.pooled_dim = pooled_dim
 
     def encode(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> torch.Tensor:
-        hidden = self.stem(x)
+        mask = pad_mask if self.padding_policy == "mask_aware" else None
+        hidden = self.stem(x, mask)
         for block in self.blocks:
-            hidden = block(hidden)
+            hidden = block(hidden, mask)
         if self.transformer is not None:
             hidden = self.proj(hidden)
             tokens = hidden.transpose(1, 2)
@@ -96,4 +107,5 @@ class MinimolReg(nn.Module):
         """Old checkpoints keep their original linear-head predictions."""
         overrides = dict(metadata.get("overrides") or {})
         overrides.setdefault("head_kind", metadata.get("head_kind", "legacy_linear"))
+        overrides.setdefault("padding_policy", metadata.get("padding_policy", "legacy_n_pad"))
         return cls(metadata["preset"], n_assays=metadata["n_assays"], **overrides)

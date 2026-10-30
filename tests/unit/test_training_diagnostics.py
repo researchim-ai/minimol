@@ -49,6 +49,32 @@ def test_accumulation_flushes_and_normalizes_partial_group(tmp_path):
     assert abs(model.weight.item() - 0.28) < 1e-6
 
 
+def test_tdc_pr_auc_uses_average_precision_direction():
+    from minimol.training.train_admet import tdc_selection_value
+
+    assert tdc_selection_value({"auprc": 0.4}, "pr-auc") == 0.4
+    assert tdc_selection_value({"mae": 0.2}, "mae") == -0.2
+    assert tdc_selection_value({"spearman": 0.3}, "spearman") == 0.3
+
+
+def test_shared_scaffold_is_not_called_a_duplicate_label():
+    import pandas as pd
+
+    from minimol.data.split_audit import cross_split_identity
+
+    frame = pd.DataFrame(
+        {
+            "inchikey": ["AAA", "AAA", "BBB"],
+            "scaffold_id": ["s", "s", "s"],
+            "split": ["train", "test", "validation"],
+        }
+    )
+    report = cross_split_identity(frame)
+    assert report["inchikey_cross_split"][0]["inchikey"] == "AAA"
+    assert report["scaffold_cross_split"]
+    assert "not a duplicated measurement" in report["note"]
+
+
 def test_selection_keeps_classification_when_regression_is_present():
     from minimol.training.train_admet import admet_selection_value
 

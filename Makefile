@@ -88,3 +88,21 @@ release-check:
 
 model-card:
 	@echo "Pass metrics from a real run: python -m minimol.cli model-card --metrics artifacts/.../metrics.json --out artifacts/MODEL_CARD.md"
+
+# Real local pilot; preparation refuses to overwrite an existing cache.
+DECIDE_CACHE ?= artifacts/reg_decide_features_v1
+DECIDE_SEED ?= 11
+DECIDE_RUN ?= artifacts/reg_decide_seed$(DECIDE_SEED)
+.PHONY: decide-prepare decide-train decide-summary decide-serve
+
+decide-prepare:
+	$(PYTHON) -m minimol.cli decide prepare --checkpoint artifacts/reg_5m_mask_v2_seed11/checkpoint_best.pt --data data/processed/malinois/data.parquet --out $(DECIDE_CACHE)
+
+decide-train:
+	$(PYTHON) -m minimol.cli decide train --config configs/decision/reg_pilot.yaml --cache $(DECIDE_CACHE) --out $(DECIDE_RUN) --seed $(DECIDE_SEED)
+
+decide-summary:
+	$(PYTHON) -m minimol.cli decide summary --runs artifacts/reg_decide_seed11 artifacts/reg_decide_seed23 artifacts/reg_decide_seed47 --cache $(DECIDE_CACHE) --out artifacts/reg_decide_summary.json
+
+decide-serve:
+	$(PYTHON) -m minimol.cli serve --decide-run $(DECIDE_RUN) --host 127.0.0.1 --port 8097

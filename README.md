@@ -1,5 +1,7 @@
 # Minimol
 
+> Исполняемый план следующего этапа для агента: [AGENT_EXECUTION_PLAN](docs/AGENT_EXECUTION_PLAN.md).
+
 Очень маленькие исследовательские модели для регуляторной ДНК, кодирующих участков и молекулярных свойств.
 
 Research use only. Not for clinical use, dosing, diagnosis, or regulatory drug-development decisions.
@@ -103,3 +105,16 @@ result = model.predict({
 Данные, признаки, предсказания и веса сохраняются в игнорируемых локальных каталогах;
 ограничение Malinois `LOCAL_USE` сохраняется. Детали и результаты:
 [Decision Model Next Stage](docs/Decision_Model_Next_Stage.md).
+
+## Jev-подобная LoRA-ветка
+
+Специализированные модели остаются; отдельно добавлен `Minimol-Decision`:
+LoRA/QLoRA/rSLora для небольшой causal LM, типизированные допустимые ответы,
+group-safe benchmark contract, calibration и оценка. Первый demo benchmark
+синтетический и проверяет правила решений, а не биологическую точность.
+
+```bash
+PYTHONPATH=src python scripts/tune_decision_lora.py --help
+```
+
+[Рецепты, запуск на 1–2 GPU и план настоящего benchmark](docs/Decision_LoRA_and_Benchmark.md).

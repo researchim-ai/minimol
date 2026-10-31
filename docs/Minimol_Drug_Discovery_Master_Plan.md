@@ -1,5 +1,7 @@
 # Minimol Drug Discovery — Master Implementation Plan
 
+> Исполняемый план следующего этапа для агента: [AGENT_EXECUTION_PLAN](AGENT_EXECUTION_PLAN.md).
+
 **Версия:** 1.0  
 **Дата:** 2026-10-28  
 **Язык:** русский  

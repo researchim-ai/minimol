@@ -160,6 +160,7 @@ def pivot_reg(df: pd.DataFrame, assays: list[str] | None = None) -> list[dict]:
                 "sequence": normalize_sequence(sequence),
                 "split": canonicalize_split(group["split"].iloc[0]),
                 "group_id": str(group["group_id"].iloc[0]),
+                "locus_group": str(group["locus_group"].iloc[0]) if "locus_group" in group.columns else "",
                 "y": y,
                 "mask": mask,
                 "se": se,

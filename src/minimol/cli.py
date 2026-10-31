@@ -182,6 +182,24 @@ def cmd_decide_predict(args) -> int:
     return 0
 
 
+def cmd_inner_split(args) -> int:
+    from minimol.data.inner_split import write_inner_split
+
+    manifest = write_inner_split(Path(args.data), Path(args.out))
+    print(f"inner split {manifest['version']} sequences {manifest['n_sequences']} groups {manifest['n_locus_groups']}")
+    return 0
+
+
+def cmd_tiny_screen(args) -> int:
+    from minimol.data.inner_split import write_inner_split_v2
+    from minimol.training.train_tiny_screen import FACTORIAL, run_screen
+
+    write_inner_split_v2(Path(args.data), Path(args.split))
+    recipes = tuple(args.recipe) if args.recipe else FACTORIAL
+    run_screen(Path(args.data), Path(args.split), Path(args.out), recipes=recipes, epochs=args.epochs, patience=args.patience, seed=args.seed)
+    return 0
+
+
 def cmd_train_reg(args) -> int:
     from minimol.config import load_yaml
     from minimol.training.train_reg import train_reg
@@ -477,6 +495,10 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_tdc.add_argument("--out", default="data/processed/tdc_admet")
     fetch_tdc.add_argument("--seed", type=int, default=1)
     fetch_tdc.set_defaults(func=cmd_fetch_tdc)
+    inner = data_sub.add_parser("inner-split")
+    inner.add_argument("--data", required=True)
+    inner.add_argument("--out", required=True)
+    inner.set_defaults(func=cmd_inner_split)
     reg_sample = data_sub.add_parser("reg-sample")
     reg_sample.add_argument("--out", required=True)
     reg_sample.add_argument("--n", type=int, default=40)
@@ -553,6 +575,15 @@ def build_parser() -> argparse.ArgumentParser:
     chem_base.add_argument("--data", required=True)
     chem_base.add_argument("--out", required=True)
     chem_base.set_defaults(func=cmd_train_admet_baseline)
+    tiny = train_sub.add_parser("tiny-screen")
+    tiny.add_argument("--data", required=True)
+    tiny.add_argument("--split", required=True)
+    tiny.add_argument("--out", required=True)
+    tiny.add_argument("--recipe", action="append")
+    tiny.add_argument("--epochs", type=int, default=20)
+    tiny.add_argument("--patience", type=int, default=5)
+    tiny.add_argument("--seed", type=int, default=11)
+    tiny.set_defaults(func=cmd_tiny_screen)
     rank = train_sub.add_parser("rank")
     rank.add_argument("--config")
     rank.add_argument("--tasks")

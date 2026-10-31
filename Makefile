@@ -106,3 +106,15 @@ decide-summary:
 
 decide-serve:
 	$(PYTHON) -m minimol.cli serve --decide-run $(DECIDE_RUN) --host 127.0.0.1 --port 8097
+
+.PHONY: decision-lora-demo decision-lora-train
+DECISION_BASE ?= Qwen/Qwen3-0.6B
+DECISION_REVISION ?=
+DECISION_DATA ?= artifacts/decision_demo/benchmark.jsonl
+DECISION_OUT ?= artifacts/decision_lora_qwen06
+
+decision-lora-demo:
+	$(PYTHON) scripts/tune_decision_lora.py build-demo --out $(DECISION_DATA) --groups 400
+
+decision-lora-train:
+	$(PYTHON) scripts/tune_decision_lora.py train --model $(DECISION_BASE) --revision "$(DECISION_REVISION)" --data $(DECISION_DATA) --out $(DECISION_OUT)

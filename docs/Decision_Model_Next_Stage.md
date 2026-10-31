@@ -1,5 +1,7 @@
 # Minimol: следующий этап — специализированные decision-модели
 
+> Исполняемый план следующего этапа для агента: [AGENT_EXECUTION_PLAN](AGENT_EXECUTION_PLAN.md).
+
 Актуализировано 30 октября 2026. Этот документ уточняет ближайший этап обоих
 основных ТЗ. Цель: маленькие модели биологических решений с явно заданным
 вопросом, вероятностным ответом и проверенной применимостью.
@@ -377,3 +379,135 @@ end-to-end probabilistic Tiny и сильного regression control, затем
   от нашего human MPRA, перенос требует локальной проверки.
 - Malinois: https://pmc.ncbi.nlm.nih.gov/articles/PMC11525185/ — task-specific
   branched outputs, reporter context, ориентация и процедура fitting.
+
+## Разбор завершённого tiny_screen и следующий этап (31 октября 2026)
+
+Источник: `artifacts/tiny_screen/screen_summary.json`, проверен также код
+`train_tiny_screen.py`, `tiny_screen.py`, `inner_split.py`. Это заменяет прежнее
+утверждение, что screen ещё не запущен: завершены шесть рецептов, seed11,
+6 эпох / 25140 updates каждый. Official validation/test в отчёте не использованы.
+
+### Что показал screen
+
+- Huber: 616450 параметров, Brier 0.0992231.
+- Distribution: 633475, Brier 0.0968025, улучшение к Huber 2.44%.
+- Staged: 633475, Brier 0.0965588, улучшение 2.69%.
+- Positional: 699139, Brier 0.0956687, улучшение 3.58%.
+- Ordinal: 616966, Brier 0.0974800, улучшение 1.76%.
+- Depthwise recipe с именем legnet: 219363, Brier 0.1081923, ухудшение 9.04%.
+
+Positional выигрывает у distribution на 1.17%, у staged на 0.92%.
+Следовательно, не весь выигрыш 3.58% связан с позиционной информацией:
+меняются также objective, uncertainty head и число параметров. Нужна факторная
+абляция. Компактный depthwise recipe не воспроизводит полный published LegNet;
+этот результат не является победой над оригинальным LegNet.
+
+MAE positional по K562/HepG2/SK-N-SH: 0.46044 / 0.42420 / 0.44646;
+Spearman: 0.69679 / 0.72942 / 0.75736. По всем шести рецептам последняя эпоха
+имеет лучший development MAE; cosine LR дошёл до нуля. Это основание проверить
+более длинный schedule с начала, но не доказательство, что больше эпох улучшит
+результат. Сравнивать эти значения со старой 5M на другой validation некорректно.
+
+### P0: исправить протокол до дополнительных GPU-серий
+
+1. **Calibration leakage baseline.** Сейчас `_constant_scale(dev_mu, dev_y,
+   dev_mask)` оценивает scale по development labels, а calibration использует
+   свой отдельно оценённый scale; метка `probability_fit=calibration_only`
+   неточна для Huber. Оценивать один per-assay scale только на calibration
+   и переносить его вместе с temperature на development без повторного fit.
+   Пересчитать доступные checkpoint; относительный выигрыш может измениться
+   в любую сторону. Старые артефакты сохранять, исправленные version отдельно.
+2. **Пороговый holdout.** В screen `_event_loss` использует REPORT_THRESHOLDS,
+   как и оценка. Они не являются unseen для этих обученных моделей, даже если
+   не использовались в предыдущем frozen-head пилоте. Развести train thresholds
+   и held-out thresholds; сравнить both seen/unseen. На старых checkpoint нельзя
+   задним числом объявить текущие четыре порога невиденными.
+3. **Реальные interval groups.** position//200 не удерживает пересекающиеся
+   окна по разные стороны границы корзины. Построить connected components
+   пересекающихся интервалов с проверенным смыслом coordinate и длины, оценить
+   распределение размеров компонент. При гигантских компонентах использовать
+   blocked genomic split с purge boundary, не разрезать их случайно. Отдельно
+   исключить дубликаты/RC-дубликаты; homology audit сообщать отдельно.
+   Новый manifest v2; нынешние результаты остаются exploratory v1.
+4. **Padding positional readout.** BinnedEncoder режет полную padded длину,
+   а не индивидуальную valid length. Для одинаковой ДНК bins меняются от batch.
+   Проверка encoder на длинах 73 и padded200 дала max difference 3.16865 на
+   random weights (это диагностика зависимости, не biological error metric).
+   Исправить bins относительно valid length. Тестировать nonzero trained heads,
+   encoder и обе mu/scale на коротких/длинных ДНК и разных соседях в batch.
+   Существующий тест с zero-initialized output head не обнаруживает ошибку.
+5. **Loss normalization и selection.** `_event_loss` суммирует четыре порога,
+   но делит на число assay observations, поэтому фактический коэффициент Brier
+   равен четырём при текущем наборе порогов. Нормировать по всем valid events
+   и явно задать lambda; это смена рецепта, требует нового run. Primary заявлен
+   Brier, но эпоха выбирается по MAE. Заранее выбрать один единый selector:
+   uncalibrated development object-macro Brier для probabilistic candidates;
+   для regression control допустим MAE selector, это явно указать. Temperature
+   fitting выполнить один раз после выбора checkpoint, только calibration.
+6. Сохранять per-object predictions, sequence/group IDs, mask, thresholds,
+   calibration parameters, код/hash/config и параметры runtime, чтобы считать
+   paired CI и проверять пайплайн. Не публиковать локальные данные/веса.
+
+### P1: подтверждение Tiny на исправленном протоколе
+
+Факторная матрица при близком parameter budget:
+A global + Huber; B positional + Huber;
+C global + distribution; D positional + distribution.
+Так отдельно измеряется эффект readout, loss и их взаимодействие.
+Добавить capacity-matched global control к ~0.70M, если его размер существенно
+меньше positional. Не приписывать выигрыш pooling дополнительным параметрам.
+
+Сначала по одному seed, новый split v2, до 20 эпох, patience5, одинаковые
+batch/data exposure и schedule policy; это стартовый budget, не обещание времени.
+Проверить throughput и loss/gradient/profile перед полными run. При необходимости
+по development выбрать один из двух заранее заданных LR, без большого поиска.
+Затем лучший positional, лучший global и сильный regression control × seeds
+11/23/47 с одинаковым полным budget. Если все четыре нужны для причинного вывода,
+повторить всю факторную матрицу, а не только удачную половину.
+Staged оставить запасным вариантом, если end-to-end нестабилен; ordinal/depthwise
+пока не масштабировать. Старые seed11 на v1 не считать одним из v2 повторов.
+
+Отчёт: mean/std по seeds, paired group-bootstrap delta Brier, per-assay Brier,
+MAE/Spearman, log loss, reliability/ECE, accuracy/regret выбора assay и пары,
+risk при coverage 50/75/100%. Уверенность для abstention брать из предсказаний,
+не из истинного label-margin. CI объектов не выдавать за CI разнообразия seeds.
+Gate: заранее заданные >=2% relative Brier против сильнейшего сопоставимого
+baseline, paired CI delta <0, assay-choice drop <=1 п.п. и отсутствие скрытой
+крупной деградации отдельных assay. На development это gate к финальной оценке,
+а не право объявлять SOTA. Первичный closed-test comparator фиксировать заранее,
+прочие сравнения вторичные; учесть множественный выбор моделей.
+
+### P2: выяснить нужный размер, затем внешние модели
+
+Базовая модель теперь около **0.70M**. Сперва подтвердить её; затем один выигравший
+рецепт на ~1M и ~2M, по одному screening seed, после — 3 seeds финалистов.
+Считать реальные параметры новой positional архитектуры: старые числа для global
+не переносятся автоматически. 5M добавить как quality ceiling/teacher на тех же
+inner splits и budget; historical 5M, видевший всю official train, не является
+честным frozen comparator на inner development. 10M/30M сейчас не приоритет.
+
+Воспроизвести разрешённые Malinois-style и настоящий LegNet-style baselines,
+проверив preprocess, reporter context, ориентацию, tuning budget и provenance.
+Не объявлять SOTA на основании победы над своим Huber. Выбирать минимальную модель
+в пределах заранее заданного 1% relative Brier от лучшей при guardrails и CPU latency.
+Сопоставить single model и ensemble отдельно; quantization после выбора рецепта.
+
+### P3: окончательная проверка
+
+Заморозить preprocessing/архитектуру/seeds/calibration/thresholds/abstention и
+сравнения. Запустить закрытый official test один раз для замороженного набора
+кандидатов; не выбирать после этого победивший рецепт и не продолжать tuning
+по test. Проверить, что test действительно не использовался всеми сравниваемыми
+checkpoint. Затем независимый разрешённый внешний benchmark для переносимости.
+Distillation — после сильного teacher, не вместо чистого подтверждения качества.
+
+**Непосредственный следующий шаг: P0 (calibration, padding, split, thresholds),
+потом исправленная Tiny-факторная серия. Длинную серию на старом v1 не запускать.**
+
+## Дополнительная ветка Minimol-Decision
+
+Специализированная серия Reg/ADMET/CDS сохраняется. Отдельно добавлены LoRA/QLoRA/
+rSLora training runner, finite-answer inference, synthetic policy benchmark и
+контракт импорта настоящих размеченных задач. Это не заменяет исправления P0 у
+Tiny screen и не является опубликованной биологической моделью. См.
+[Decision LoRA and Benchmark](Decision_LoRA_and_Benchmark.md).
